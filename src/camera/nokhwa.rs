@@ -1,6 +1,8 @@
 //! nokhwa backend (AVFoundation / Media Foundation / V4L2).
 
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow};
 use nokhwa::Camera;
@@ -13,27 +15,91 @@ pub fn request_permission() {
   nokhwa::nokhwa_initialize(|granted| tracing::info!("camera permission granted: {granted}"));
 }
 
-pub fn list() -> Result<Vec<CameraInfo>> {
+/// Filter stale or unavailable devices by initializing each device with a supported format.
+/// This excludes built-in cameras that are unavailable while a laptop is closed, as well as
+/// disconnected or inaccessible cameras.
+pub fn list_available() -> Result<Vec<CameraInfo>> {
   let cameras = nokhwa::query(ApiBackend::Auto).context("querying cameras")?;
-  Ok(
-    cameras
-      .iter()
-      .map(|c| CameraInfo {
-        id: c.human_name(),
-        name: c.human_name(),
-      })
-      .collect(),
-  )
+  let devices = cameras.into_iter().map(camera_info).collect::<Vec<_>>();
+  Ok(filter_available(devices))
 }
 
-fn open(id: Option<&str>, note: &mut dyn FnMut(String)) -> Result<Camera> {
-  let cameras = nokhwa::query(ApiBackend::Auto).context("querying cameras")?;
-  let info = match id {
-    Some(id) => cameras.iter().find(|c| c.human_name() == id),
-    None => None,
+fn camera_info(camera: nokhwa::utils::CameraInfo) -> CameraInfo {
+  let name = camera.human_name();
+  let id = camera.misc();
+  CameraInfo {
+    id: if id.is_empty() { name.clone() } else { id },
+    name,
   }
-  .or(cameras.first())
-  .ok_or_else(|| anyhow!("no camera found"))?;
+}
+
+fn find_device<'a>(cameras: &'a [nokhwa::utils::CameraInfo], id: Option<&str>) -> Option<&'a nokhwa::utils::CameraInfo> {
+  match id {
+    Some(id) => cameras.iter().find(|camera| {
+      let misc = camera.misc();
+      (!misc.is_empty() && misc == id) || (misc.is_empty() && camera.human_name() == id)
+    }),
+    None => cameras.first(),
+  }
+}
+
+fn filter_available(cameras: impl IntoIterator<Item = CameraInfo>) -> Vec<CameraInfo> {
+  filter_available_with(cameras, |camera| {
+    let available_now = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| probe(camera)));
+    match available_now {
+      Ok(Ok(())) => {
+        tracing::info!("camera discovery: {} is available", camera.name);
+        true
+      }
+      Ok(Err(error)) => {
+        tracing::info!("camera discovery: {} unavailable: {error:#}", camera.name);
+        false
+      }
+      Err(_) => {
+        tracing::warn!("camera discovery: {} backend panicked", camera.name);
+        false
+      }
+    }
+  })
+}
+
+/// Verify the camera actually delivers a frame. The probe runs on a disposable worker with a
+/// timeout, so a closed-lid camera cannot block the UI or be offered as available.
+fn probe(camera: &CameraInfo) -> Result<()> {
+  const PROBE_TIMEOUT: Duration = Duration::from_secs(3);
+  let id = camera.id.clone();
+  let (tx, rx) = mpsc::sync_channel(1);
+  std::thread::Builder::new()
+    .name("camera-probe".into())
+    .spawn(move || {
+      let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut note = |_| {};
+        let mut camera = open(Some(&id), &mut note, false)?;
+        camera.frame().context("waiting for probe frame")?;
+        camera.stop_stream().map_err(|error| anyhow!("stopping availability probe: {error}"))?;
+        Ok(())
+      }))
+      .unwrap_or_else(|_| Err(anyhow!("camera probe backend panicked")));
+      let _ = tx.send(result);
+    })
+    .context("starting camera probe thread")?;
+  match rx.recv_timeout(PROBE_TIMEOUT) {
+    Ok(result) => result,
+    Err(mpsc::RecvTimeoutError::Timeout) => Err(anyhow!("timed out waiting for a camera frame")),
+    Err(mpsc::RecvTimeoutError::Disconnected) => Err(anyhow!("camera probe stopped unexpectedly")),
+  }
+}
+
+fn filter_available_with(cameras: impl IntoIterator<Item = CameraInfo>, mut is_available: impl FnMut(&CameraInfo) -> bool) -> Vec<CameraInfo> {
+  cameras.into_iter().filter(|camera| is_available(camera)).collect()
+}
+
+fn open(id: Option<&str>, note: &mut dyn FnMut(String), verify_frame: bool) -> Result<Camera> {
+  let cameras = nokhwa::query(ApiBackend::Auto).context("querying cameras")?;
+  let info = find_device(&cameras, id).ok_or_else(|| match id {
+    Some(id) => anyhow!("camera {id:?} is no longer available"),
+    None => anyhow!("no camera found"),
+  })?;
 
   // The backend's own default (640x480@15 YUYV) does not exist on every camera, so try several
   // initial requests. A request only has to open the device: the real mode is chosen below.
@@ -79,6 +145,9 @@ fn open(id: Option<&str>, note: &mut dyn FnMut(String)) -> Result<Camera> {
       note(format!("stream {mode} failed: {e}"));
       continue;
     }
+    if !verify_frame {
+      return Ok(camera);
+    }
     match camera.frame() {
       Ok(buffer) => {
         let res = buffer.resolution();
@@ -93,9 +162,10 @@ fn open(id: Option<&str>, note: &mut dyn FnMut(String)) -> Result<Camera> {
     let _ = camera.stop_stream();
   }
 
-  // Last resort: whatever the backend defaults to.
-  note("no mode verified; using the backend default".to_owned());
-  camera.open_stream().context("starting stream")?;
+  // Preserve the backend-selected format as a last resort. Some cameras report modes that the
+  // setter accepts but that AVFoundation cannot activate; their default stream may still work.
+  note("requested modes failed; trying the backend default".to_owned());
+  camera.open_stream().context("starting backend-default stream")?;
   Ok(camera)
 }
 
@@ -119,7 +189,9 @@ fn rank_formats(formats: &[CameraFormat]) -> Vec<CameraFormat> {
 
 /// Capture until `stop` is set, passing each frame to `sink`.
 pub fn capture(id: Option<&str>, stop: &AtomicBool, note: &mut dyn FnMut(String), mut sink: impl FnMut(Frame)) -> Result<()> {
-  let mut camera = open(id, note)?;
+  // The frame read can block indefinitely for unavailable cameras. Keep it in the capture loop
+  // so the controller can time out startup and move on without blocking its UI thread.
+  let mut camera = open(id, note, false)?;
   while !stop.load(Ordering::Relaxed) {
     let buffer = camera.frame().context("reading frame")?;
     let image = buffer.decode_image::<RgbAFormat>().context("decoding frame")?;
@@ -144,6 +216,36 @@ mod tests {
 
   fn f(w: u32, h: u32, fps: u32, fmt: FrameFormat) -> CameraFormat {
     CameraFormat::new_from(w, h, fmt, fps)
+  }
+
+  #[test]
+  fn unavailable_devices_are_excluded() {
+    let cameras = [
+      CameraInfo {
+        id: "available".to_owned(),
+        name: "Available camera".to_owned(),
+      },
+      CameraInfo {
+        id: "closed".to_owned(),
+        name: "Closed laptop camera".to_owned(),
+      },
+    ];
+    let filtered = filter_available_with(cameras, |camera| camera.id == "available");
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(filtered[0].id, "available");
+  }
+
+  #[test]
+  fn device_lookup_uses_stable_identifier_and_does_not_fall_back() {
+    let cameras = [
+      nokhwa::utils::CameraInfo::new("Built-in", "", "builtin-id", nokhwa::utils::CameraIndex::Index(0)),
+      nokhwa::utils::CameraInfo::new("External", "", "external-id", nokhwa::utils::CameraIndex::Index(1)),
+    ];
+    assert_eq!(
+      find_device(&cameras, Some("external-id")).map(|camera| camera.human_name()),
+      Some("External".to_owned())
+    );
+    assert!(find_device(&cameras, Some("missing-id")).is_none());
   }
 
   #[test]
