@@ -72,6 +72,8 @@ irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
 - **Adaptive, resizable layout.** Cycle 4 current/next/notes arrangements (or a H/V current+next split without notes) with `L`; drag any divider to resize. Sizes are remembered.
 - **Laser pointer & drawing, mirrored.** Hold the mouse on the current slide for a pointer dot, or press `P` to draw freehand — shown live on the audience screen. Pick the colour from a swatch in the header.
 - **Zoom & pan.** `Ctrl`/`⌘` + scroll zooms at the cursor, `Ctrl` + drag pans — on either window, mirrored to the room.
+- **Webcam overlay.** Show your camera in a corner of the audience window only (`C`). Pick the source, corner, shape (rectangle, rounded, circle), size and mirroring from the ⚙ popover, which also shows a live preview and the capture resolution. The camera only runs while presenting or while that popover is open, so it is off the rest of the time.
+- **Background removal or blur.** Optionally cut yourself out of the camera image (transparent background) or blur the background instead. A small segmentation model (about 0.5 MB) is built into the app and runs on the CPU; nothing is downloaded and nothing leaves your machine.
 - **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; cycle system/dark/light theme from the header.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
 - **Remembers everything.** Window position, panel sizes, fonts, layout, theme, pointer colour, thumbnail strip, and recent files persist between sessions, in a single JSON file (`~/.config/presenter/state.json` on macOS/Linux, `%APPDATA%\presenter\state.json` on Windows).
@@ -92,6 +94,7 @@ irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
 | `S` | Swap presenter / presentation screens |
 | `+` / `−` | Footer font larger / smaller |
 | `O` | Open a PDF |
+| `C` | Toggle the webcam overlay (settings in the ⚙ popover) |
 | `P` / `D` | Toggle laser pointer / drawing · delete all drawings |
 | Hold mouse on current slide (either window) | Laser pointer / draw (shown on the audience screen) |
 | `Ctrl` (or `⌘`) + scroll / drag (either window) | Zoom at the cursor / pan the zoomed slide |
@@ -99,6 +102,15 @@ irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
 | Drag & drop a PDF | Open it |
 
 All mouse features work on **either window** and drive the same shared state, so the pointer, drawings, and zoom always mirror between the presenter and audience screens. The **Shortcuts** button in the header shows this list in-app.
+
+## Webcam
+
+Enable it with `C` or from the ⚙ popover in the header. The overlay appears on the audience window only (hidden while the screen is blanked with `B`).
+
+- **Source:** all cameras the OS reports are listed; use ⟳ to rescan. The app picks the best mode of at least 720p at about 30 fps, and the popover shows the resolution actually received. **Capture details** lists the modes the camera offers, useful when a camera delivers less than expected.
+- **Layout:** corner, size, shape and mirror are saved with your other settings.
+- **Background:** *Keep*, *Remove* (person only, transparent) or *Blur*. Remove ignores the shape setting. Quality improves with a sharper camera image.
+- **Permissions:** on macOS the first start asks for camera access. When running with `just run` from a terminal, that terminal app needs camera access in System Settings > Privacy & Security > Camera. The bundled `.app` carries its own usage description.
 
 ## Build from source
 
@@ -136,4 +148,4 @@ The **About** window lists every third-party library with its license, generated
 
 ## License
 
-Licensed under the [MIT license](LICENSE). PDF rendering uses Google's PDFium (BSD-3-Clause), bundled with the application; full license texts are in the app's **About** window and in `assets/thirdparty.md`.
+Licensed under the [MIT license](LICENSE). PDF rendering uses Google's PDFium (BSD-3-Clause), bundled with the application. Background removal uses the MediaPipe selfie segmentation model (Apache-2.0, ONNX conversion by onnx-community) with ONNX Runtime; full license texts are in the app's **About** window and in `assets/thirdparty.md`.
