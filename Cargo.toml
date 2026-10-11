@@ -21,8 +21,6 @@ icon = [
 # Ship the platform's PDFium dynamic library inside the bundle. Populate this folder
 # with `just setup-pdfium` before bundling.
 resources = ["third_party/pdfium/lib"]
-# Required for webcam access on macOS (without it the camera fails silently).
-osx_info_plist_exts = ["bundle/info-ext.plist"]
 category = "Productivity"
 short_description = "Dual-screen PDF presenter for Typst & LaTeX slides."
 long_description = """
@@ -30,6 +28,10 @@ A fast, native dual-screen PDF presenter inspired by pympress. On the presenter
 screen it shows the current slide, a next-slide preview, speaker notes, and a talk
 timer; on the audience screen it shows just the slide, fullscreen.
 """
+
+# Required for webcam access on macOS (without it the camera fails silently).
+[package.metadata.bundle.osx]
+info_plist_exts = ["bundle/info-ext.plist"]
 
 [dependencies]
 eframe = { version = "0.33", features = ["wgpu"] }
