@@ -1,6 +1,7 @@
 //! rust-presenters library crate: the app modules, shared by the binary and tests.
 
 pub mod app;
+pub mod camera;
 pub mod config;
 pub mod document;
 pub mod platform;

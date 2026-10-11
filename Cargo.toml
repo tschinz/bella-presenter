@@ -21,6 +21,8 @@ icon = [
 # Ship the platform's PDFium dynamic library inside the bundle. Populate this folder
 # with `just setup-pdfium` before bundling.
 resources = ["third_party/pdfium/lib"]
+# Required for webcam access on macOS (without it the camera fails silently).
+osx_info_plist_exts = ["bundle/info-ext.plist"]
 category = "Productivity"
 short_description = "Dual-screen PDF presenter for Typst & LaTeX slides."
 long_description = """
@@ -46,6 +48,7 @@ rfd = "0.15"
 display-info = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 notify = "8.2.0"
+nokhwa = { version = "0.10.11", features = ["input-native"] }
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering

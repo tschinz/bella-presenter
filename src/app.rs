@@ -121,6 +121,7 @@ pub struct PresenterApp {
   presenting: bool,
   /// When true, the audience window shows solid black instead of the slide.
   blanked: bool,
+  camera: crate::camera::controller::CameraController,
   audience_fullscreen: bool,
   audience_geometry: Option<Geometry>,
   window_geometry: Option<Geometry>,
@@ -209,6 +210,7 @@ impl PresenterApp {
       layout_index: st.layout_index % NUM_LAYOUTS,
       presenting: false,
       blanked: false,
+      camera: crate::camera::controller::CameraController::new(st.camera.clone()),
       audience_fullscreen: st.audience_fullscreen,
       audience_geometry: st.audience_geometry,
       window_geometry: st.window_geometry,
@@ -326,6 +328,7 @@ impl PresenterApp {
       pointer_color: self.pointer_color,
       theme: self.theme,
       hot_reload: self.hot_reload,
+      camera: self.camera.settings.clone(),
     }
   }
 
@@ -609,6 +612,10 @@ impl PresenterApp {
       if i.key_pressed(Key::B) {
         self.blanked = !self.blanked;
       }
+      if i.key_pressed(Key::C) && !i.modifiers.command {
+        self.camera.settings.enabled = !self.camera.settings.enabled;
+        self.dirty = true;
+      }
       if i.key_pressed(Key::P) {
         self.toggle_mode();
       }
@@ -784,6 +791,10 @@ impl PresenterApp {
                     .changed()
                   {
                     self.rewatch = true;
+                    self.dirty = true;
+                  }
+                  ui.separator();
+                  if self.camera.settings_ui(ui) {
                     self.dirty = true;
                   }
                 });
@@ -1016,6 +1027,7 @@ impl PresenterApp {
           ("F5", "Start presentation"),
           ("Esc", "Quit presentation"),
           ("B", "Blank the audience screen (black)"),
+          ("C", "Toggle the webcam overlay"),
           ("W", "Close file, back to start screen"),
           ("R", "Reset the talk timer"),
           ("L", "Flip layout (H/V with no notes; 4 presets with notes)"),
@@ -1404,6 +1416,7 @@ impl PresenterApp {
 impl eframe::App for PresenterApp {
   fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
     ctx.set_theme(theme_pref(self.theme));
+    self.camera.update(ctx, self.presenting);
 
     // Window title carries the open file and its page count (kept out of the header).
     let want_title = match self.document.as_ref() {
@@ -1594,6 +1607,10 @@ impl PresenterApp {
           let (slide_rect, slide_double) = self.audience_slide(ui, vctx);
           if slide_double {
             toggle_fullscreen = true;
+          }
+          // Webcam overlay in a corner (audience window only; hidden while blanked).
+          if !self.blanked {
+            self.camera.draw_overlay(ui, ui.max_rect());
           }
           // Scroll to navigate and Ctrl/Cmd+scroll to zoom, anchored at this window's slide.
           self.handle_wheel(vctx, slide_rect, None);

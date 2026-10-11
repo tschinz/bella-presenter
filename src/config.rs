@@ -52,6 +52,55 @@ pub struct RecentEntry {
   pub page: usize,
 }
 
+/// Screen corner for the camera overlay.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum Corner {
+  TopLeft,
+  TopRight,
+  BottomLeft,
+  #[default]
+  BottomRight,
+}
+
+/// Outline of the camera overlay.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum CameraShape {
+  #[default]
+  Rect,
+  Rounded,
+  Circle,
+}
+
+/// Webcam overlay settings (shown on the audience window only).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(default)]
+pub struct CameraSettings {
+  pub enabled: bool,
+  /// Device name; `None` = first available camera.
+  pub device: Option<String>,
+  pub corner: Corner,
+  /// Overlay width as a fraction of the audience window width.
+  pub size: f32,
+  /// Distance from the window edge as a fraction of the audience window width.
+  pub margin: f32,
+  pub mirror: bool,
+  pub shape: CameraShape,
+}
+
+impl Default for CameraSettings {
+  fn default() -> Self {
+    Self {
+      enabled: false,
+      device: None,
+      corner: Corner::default(),
+      size: 0.2,
+      margin: 0.015,
+      mirror: true,
+      shape: CameraShape::default(),
+    }
+  }
+}
+
 /// Everything persisted between sessions.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -70,6 +119,7 @@ pub struct State {
   pub theme: Theme,
   /// Reload the open PDF when its file changes on disk.
   pub hot_reload: bool,
+  pub camera: CameraSettings,
 }
 
 impl Default for State {
@@ -87,6 +137,7 @@ impl Default for State {
       pointer_color: [230, 30, 30],
       theme: Theme::System,
       hot_reload: true,
+      camera: CameraSettings::default(),
     }
   }
 }
