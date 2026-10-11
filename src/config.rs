@@ -71,6 +71,35 @@ pub enum CameraShape {
   Circle,
 }
 
+/// What to do with the camera background.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum BackgroundMode {
+  #[default]
+  Off,
+  /// Cut out the person, transparent background.
+  Remove,
+  /// Keep the background but blur it.
+  Blur,
+}
+
+impl BackgroundMode {
+  pub fn to_u8(self) -> u8 {
+    match self {
+      Self::Off => 0,
+      Self::Remove => 1,
+      Self::Blur => 2,
+    }
+  }
+
+  pub fn from_u8(v: u8) -> Self {
+    match v {
+      1 => Self::Remove,
+      2 => Self::Blur,
+      _ => Self::Off,
+    }
+  }
+}
+
 /// Webcam overlay settings (shown on the audience window only).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(default)]
@@ -85,6 +114,8 @@ pub struct CameraSettings {
   pub margin: f32,
   pub mirror: bool,
   pub shape: CameraShape,
+  /// Background handling (the shape setting is ignored while removing).
+  pub background: BackgroundMode,
 }
 
 impl Default for CameraSettings {
@@ -97,6 +128,7 @@ impl Default for CameraSettings {
       margin: 0.015,
       mirror: true,
       shape: CameraShape::default(),
+      background: BackgroundMode::Off,
     }
   }
 }

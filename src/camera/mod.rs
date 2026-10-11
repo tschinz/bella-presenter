@@ -6,12 +6,16 @@
 pub mod controller;
 mod nokhwa;
 pub mod overlay;
+pub mod processing;
+mod segment;
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
 use anyhow::Result;
+
+use processing::FrameProcessor;
 
 /// A selectable capture device. `id` is the device name, which is more stable than an index.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,7 +58,7 @@ pub struct CameraStream {
 
 impl CameraStream {
   /// Start capturing from the camera with the given id (`None` = first device).
-  pub fn start(id: Option<String>, ctx: egui::Context) -> Self {
+  pub fn start(id: Option<String>, background: Arc<AtomicU8>, ctx: egui::Context) -> Self {
     let shared = Arc::new(Shared::default());
     let stop = Arc::new(AtomicBool::new(false));
     let join = {
@@ -64,6 +68,8 @@ impl CameraStream {
         .name("camera".into())
         .spawn(move || {
           let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut segmenter: Option<segment::Segmenter> = None;
+            let mut segmenter_failed = false;
             let mut note = |line: String| {
               tracing::info!("camera: {line}");
               if let Ok(mut d) = shared.diag.lock() {
@@ -71,7 +77,25 @@ impl CameraStream {
               }
               ctx.request_repaint();
             };
-            nokhwa::capture(id.as_deref(), &stop, &mut note, |frame| {
+            nokhwa::capture(id.as_deref(), &stop, &mut note, |mut frame| {
+              let mode = crate::config::BackgroundMode::from_u8(background.load(Ordering::Relaxed));
+              if mode != crate::config::BackgroundMode::Off && !segmenter_failed {
+                if segmenter.is_none() {
+                  match segment::Segmenter::new() {
+                    Ok(s) => segmenter = Some(s),
+                    Err(e) => {
+                      tracing::warn!("background removal unavailable: {e:#}");
+                      segmenter_failed = true;
+                    }
+                  }
+                }
+                if let Some(s) = segmenter.as_mut() {
+                  frame = s.process(frame);
+                  if mode == crate::config::BackgroundMode::Blur {
+                    processing::composite_blur(&mut frame);
+                  }
+                }
+              }
               if let Ok(mut slot) = shared.latest.lock() {
                 *slot = Some(frame);
               }

@@ -1,11 +1,14 @@
 //! UI-side camera state: owns the stream and texture, draws the overlay, and shows the
 //! settings controls. Keeps `app.rs` free of camera details.
 
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
+
 use egui::{Color32, Rect, TextureHandle, TextureOptions, pos2};
 
 use super::overlay::place;
 use super::{CameraInfo, CameraStream, list_cameras, request_permission};
-use crate::config::{CameraSettings, CameraShape, Corner};
+use crate::config::{BackgroundMode, CameraSettings, CameraShape, Corner};
 
 pub struct CameraController {
   pub settings: CameraSettings,
@@ -17,10 +20,13 @@ pub struct CameraController {
   permission_requested: bool,
   /// Set by `settings_ui` while the settings popover is open (the preview needs frames).
   preview_seen: bool,
+  /// Shared with the capture thread; toggles segmentation without restarting the camera.
+  background: Arc<AtomicU8>,
 }
 
 impl CameraController {
   pub fn new(settings: CameraSettings) -> Self {
+    let background = Arc::new(AtomicU8::new(settings.background.to_u8()));
     Self {
       settings,
       stream: None,
@@ -29,6 +35,7 @@ impl CameraController {
       running_device: None,
       permission_requested: false,
       preview_seen: false,
+      background,
     }
   }
 
@@ -38,6 +45,7 @@ impl CameraController {
   pub fn update(&mut self, ctx: &egui::Context, presenting: bool) {
     let wanted = self.settings.enabled && (presenting || self.preview_seen);
     self.preview_seen = false;
+    self.background.store(self.settings.background.to_u8(), Ordering::Relaxed);
     if !wanted {
       if self.stream.is_some() {
         self.stream = None;
@@ -54,7 +62,7 @@ impl CameraController {
         request_permission();
       }
       self.running_device = self.settings.device.clone();
-      self.stream = Some(CameraStream::start(self.settings.device.clone(), ctx.clone()));
+      self.stream = Some(CameraStream::start(self.settings.device.clone(), self.background.clone(), ctx.clone()));
     }
     if let Some(frame) = self.stream.as_ref().and_then(|s| s.take_frame()) {
       if frame.rgba.len() != frame.width as usize * frame.height as usize * 4 {
@@ -91,7 +99,7 @@ impl CameraController {
     let s = &self.settings;
     let [tw, th] = tex.size();
     let frame_aspect = tw as f32 / th.max(1) as f32;
-    let shape = s.shape;
+    let shape = if s.background == BackgroundMode::Remove { CameraShape::Rect } else { s.shape };
     let circle = shape == CameraShape::Circle;
     let aspect = if circle { 1.0 } else { frame_aspect };
     let rect = place(area, s.corner, size, s.margin, aspect);
@@ -179,6 +187,16 @@ impl CameraController {
     });
     changed |= ui.add(egui::Slider::new(&mut self.settings.size, 0.08..=0.5).text("Size")).changed();
     changed |= ui.checkbox(&mut self.settings.mirror, "Mirror").changed();
+    ui.horizontal(|ui| {
+      ui.label("Background");
+      for (mode, label) in [
+        (BackgroundMode::Off, "Keep"),
+        (BackgroundMode::Remove, "Remove"),
+        (BackgroundMode::Blur, "Blur"),
+      ] {
+        changed |= ui.selectable_value(&mut self.settings.background, mode, label).changed();
+      }
+    });
 
     if let Some(err) = self.error() {
       ui.colored_label(Color32::LIGHT_RED, format!("Camera error: {err}"));
@@ -212,6 +230,8 @@ impl CameraController {
       } else {
         Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
       };
+      // Dark backdrop so a removed background is visible as transparency.
+      ui.painter().rect_filled(rect, 0.0, Color32::from_gray(40));
       ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
     }
     changed

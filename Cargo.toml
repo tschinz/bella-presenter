@@ -49,6 +49,7 @@ display-info = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 notify = "8.2.0"
 nokhwa = { version = "0.10.11", features = ["input-native"] }
+ort = "2.0.0-rc.13"
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering
