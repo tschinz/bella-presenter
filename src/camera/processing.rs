@@ -44,6 +44,56 @@ pub fn apply_mask(frame: &mut Frame, mask: &[f32], mw: usize, mh: usize) {
   }
 }
 
+/// Crop away transparent pixels around the segmented person, keeping `padding` as a fraction
+/// of the larger bounding-box dimension on each side. Returns `false` when no visible person is
+/// present (leaves the frame unchanged).
+pub fn crop_to_visible(frame: &mut Frame, padding: f32) -> bool {
+  let (w, h) = (frame.width as usize, frame.height as usize);
+  if w == 0 || h == 0 || frame.rgba.len() != w * h * 4 {
+    return false;
+  }
+
+  let (mut left, mut top, mut right, mut bottom) = (w, h, 0usize, 0usize);
+  let mut found = false;
+  for y in 0..h {
+    for x in 0..w {
+      if frame.rgba[(y * w + x) * 4 + 3] >= 24 {
+        found = true;
+        left = left.min(x);
+        top = top.min(y);
+        right = right.max(x);
+        bottom = bottom.max(y);
+      }
+    }
+  }
+  if !found {
+    return false;
+  }
+
+  let box_w = right - left + 1;
+  let box_h = bottom - top + 1;
+  let pad = ((box_w.max(box_h) as f32 * padding.max(0.0)).round() as usize).min(w.max(h));
+  left = left.saturating_sub(pad);
+  top = top.saturating_sub(pad);
+  right = right.saturating_add(pad).min(w - 1);
+  bottom = bottom.saturating_add(pad).min(h - 1);
+  let crop_w = right - left + 1;
+  let crop_h = bottom - top + 1;
+
+  if crop_w == w && crop_h == h {
+    return true;
+  }
+  let mut rgba = Vec::with_capacity(crop_w * crop_h * 4);
+  for y in top..=bottom {
+    let start = (y * w + left) * 4;
+    rgba.extend_from_slice(&frame.rgba[start..start + crop_w * 4]);
+  }
+  frame.width = crop_w as u32;
+  frame.height = crop_h as u32;
+  frame.rgba = rgba;
+  true
+}
+
 /// Replace the background of a frame whose alpha channel holds the person mask with a blurred
 /// copy of itself, then make the frame opaque. The blur is normalised by background weight, so
 /// the person's colours do not bleed into it.
@@ -170,6 +220,34 @@ mod tests {
     apply_mask(&mut f, &[1.0, 0.0], 2, 1);
     assert_eq!(f.rgba[3], 255);
     assert_eq!(f.rgba[(7) * 4 + 3], 0);
+  }
+
+  #[test]
+  fn crops_transparent_margins_and_keeps_padding() {
+    let mut f = frame(10, 8);
+    for pixel in f.rgba.as_chunks_mut::<4>().0 {
+      pixel[3] = 0;
+    }
+    for y in 2..6 {
+      for x in 3..7 {
+        f.rgba[(y * 10 + x) * 4 + 3] = 255;
+      }
+    }
+    assert!(crop_to_visible(&mut f, 0.25));
+    // 4x4 subject plus one pixel of padding, clipped to original bounds.
+    assert_eq!((f.width, f.height), (6, 6));
+    assert_eq!(f.rgba.len(), 6 * 6 * 4);
+    assert_eq!(f.rgba[43], 255);
+  }
+
+  #[test]
+  fn does_not_crop_empty_mask() {
+    let mut f = frame(10, 8);
+    for pixel in f.rgba.as_chunks_mut::<4>().0 {
+      pixel[3] = 0;
+    }
+    assert!(!crop_to_visible(&mut f, 0.1));
+    assert_eq!((f.width, f.height), (10, 8));
   }
 
   #[test]
