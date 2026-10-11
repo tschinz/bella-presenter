@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.2.0] - 2026-10-11
+
+### 🚀 Features
+
+- *(camera)* Show a webcam overlay on the audience window ([0ee9c47](https://github.com/tschinz/presenters/commit/0ee9c47cebb3a2e0ea917e50e7605fe729ee8b33) - zas)
+- *(camera)* Remove or blur the webcam background ([3e5fec8](https://github.com/tschinz/presenters/commit/3e5fec870528afcda4674c7b9684da1d173082ad) - zas)
+- *(readme)* Metnio the new camera feature ([912ccc6](https://github.com/tschinz/presenters/commit/912ccc6766beb27f447a9a30ac4545e5d4f9f249) - zas)
+- *(camera)* Crop transparent margins in remove mode ([91f0f9f](https://github.com/tschinz/presenters/commit/91f0f9fd3bfc0b47f2e68a108834cdd3a968d2e2) - zas)
+
+### 🐛 Bug Fixes
+
+- *(bundle)* Move the camera plist key into the osx table ([50809e6](https://github.com/tschinz/presenters/commit/50809e64fe238fe7c13e10587f4d631db71cc01e) - zas)
+- *(camera)* Recover from unavailable devices and stuck streams ([51cbfa6](https://github.com/tschinz/presenters/commit/51cbfa633745ee53a5a4877f0dbc527fdd56ea73) - zas)
+
+### ⚙️ Miscellaneous Tasks
+
+- *(readme)* Update readme with the camera feature ([079c623](https://github.com/tschinz/presenters/commit/079c623bfc2cc454af95df6fdf56a5de34b90a92) - zas)
+
+
+**Full Changelog**: [v0.1.9...0.2.0](https://github.com/tschinz/presenters/compare/v0.1.9...0.2.0)
+
 ## [0.1.9] - 2026-10-10
 
 ### 🚀 Features
@@ -137,6 +158,3 @@ All notable changes to this project will be documented in this file.
 - Add changelog and prepare release ([556a442](https://github.com/tschinz/presenters/commit/556a4427feb306f026a399f31199ef20229200eb) - zas)
 - Prepare release 0.1.0 ([1864cac](https://github.com/tschinz/presenters/commit/1864caca7c2c5978620f75120eef192dca0d57a0) - zas)
 - Add license details ([c4ebf82](https://github.com/tschinz/presenters/commit/c4ebf829733d9c221444dbf96368f86b6f3914cd) - zas)
-
-
-
