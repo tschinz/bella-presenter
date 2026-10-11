@@ -38,6 +38,14 @@ It stays instant even on large decks (300+ pages) thanks to lazy rendering, a te
 
 ![Freehand annotations drawn on the current slide](img/screenshot-drawing.png)
 
+**Audience webcam overlay** - show the presenter in a configurable corner of the projected slide.
+
+![Audience view with the webcam in a circular overlay and removed background](img/screenshot-audience-view.png)
+
+**Camera settings** - choose the camera, position, size and shape; set the background to normal, blurred or removed.
+
+![Camera settings showing shape and background choices, with the face pixelated](img/screenshot-camera-settings.png)
+
 ## Install
 
 Grab a prebuilt binary from the [latest release](https://github.com/tschinz/presenters/releases/latest) — PDFium is bundled, so there is nothing else to install:
@@ -72,8 +80,8 @@ irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
 - **Adaptive, resizable layout.** Cycle 4 current/next/notes arrangements (or a H/V current+next split without notes) with `L`; drag any divider to resize. Sizes are remembered.
 - **Laser pointer & drawing, mirrored.** Hold the mouse on the current slide for a pointer dot, or press `P` to draw freehand — shown live on the audience screen. Pick the colour from a swatch in the header.
 - **Zoom & pan.** `Ctrl`/`⌘` + scroll zooms at the cursor, `Ctrl` + drag pans — on either window, mirrored to the room.
-- **Webcam overlay.** Show your camera in a corner of the audience window only (`C`). Pick the source, corner, shape (rectangle, rounded, circle), size and mirroring from the ⚙ popover, which also shows a live preview and the capture resolution. The camera only runs while presenting or while that popover is open, so it is off the rest of the time.
-- **Background removal or blur.** Optionally cut yourself out of the camera image (transparent background) or blur the background instead. A small segmentation model (about 0.5 MB) is built into the app and runs on the CPU; nothing is downloaded and nothing leaves your machine.
+- **Webcam overlay.** Show your camera in a configurable corner of the audience window only (`C`). Choose a rectangle, rounded rectangle or circle, and set the size, source and mirroring from the ⚙ popover, which also shows a live preview and capture resolution. The camera runs only while presenting or while the settings popover is open.
+- **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
 - **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; cycle system/dark/light theme from the header.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
 - **Remembers everything.** Window position, panel sizes, fonts, layout, theme, pointer colour, thumbnail strip, and recent files persist between sessions, in a single JSON file (`~/.config/presenter/state.json` on macOS/Linux, `%APPDATA%\presenter\state.json` on Windows).
@@ -109,7 +117,8 @@ Enable it with `C` or from the ⚙ popover in the header. The overlay appears on
 
 - **Source:** all cameras the OS reports are listed; use ⟳ to rescan. The app picks the best mode of at least 720p at about 30 fps, and the popover shows the resolution actually received. **Capture details** lists the modes the camera offers, useful when a camera delivers less than expected.
 - **Layout:** corner, size, shape and mirror are saved with your other settings.
-- **Background:** *Keep*, *Remove* (person only, transparent) or *Blur*. Remove ignores the shape setting. Quality improves with a sharper camera image.
+- **Shape:** rectangle, rounded rectangle or circle.
+- **Background:** *Keep* (normal image), *Blur* (person stays sharp) or *Remove* (transparent background, showing only the person). Removal ignores the shape setting. Quality improves with a sharper camera image.
 - **Permissions:** on macOS the first start asks for camera access. When running with `just run` from a terminal, that terminal app needs camera access in System Settings > Privacy & Security > Camera. The bundled `.app` carries its own usage description.
 
 ## Build from source
