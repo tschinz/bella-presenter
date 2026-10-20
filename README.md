@@ -158,3 +158,5 @@ The **About** window lists every third-party library with its license, generated
 ## License
 
 Licensed under the [MIT license](LICENSE). PDF rendering uses Google's PDFium (BSD-3-Clause), bundled with the application. Background removal uses the MediaPipe selfie segmentation model (Apache-2.0, ONNX conversion by onnx-community) with ONNX Runtime; full license texts are in the app's **About** window and in `assets/thirdparty.md`.
+
+The logo is built from one of the Ferris illustrations in the [free-ferris-pack](https://github.com/MariaLetta/free-ferris-pack) by Maria Letta (CC0-1.0).
