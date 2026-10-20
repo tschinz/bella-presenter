@@ -63,7 +63,7 @@ jobs:
       - name: Zip .app
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            "target/release/bundle/osx/presenters.app" presenters-macos-arm64.zip
+            "target/release/bundle/osx/bella-presenter.app" bella-presenter-macos-arm64.zip
       - name: Download release notes
         uses: actions/download-artifact@v4
         with:
@@ -71,7 +71,7 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: presenters-macos-arm64.zip
+          files: bella-presenter-macos-arm64.zip
 
   linux:
     name: Linux .deb
@@ -125,12 +125,12 @@ jobs:
       - name: Assemble portable zip
         shell: bash
         run: |
-          mkdir -p dist/presenters
-          cp target/release/rust-presenters.exe dist/presenters/presenters.exe
-          cp third_party/pdfium/bin/pdfium.dll dist/presenters/
-          cp README.md dist/presenters/ || true
-          cp img/icon-256.png dist/presenters/ || true
-          cd dist && 7z a ../presenters-windows-x64.zip presenters
+          mkdir -p dist/bella-presenter
+          cp target/release/bella-presenter.exe dist/bella-presenter/bella-presenter.exe
+          cp third_party/pdfium/bin/pdfium.dll dist/bella-presenter/
+          cp README.md dist/bella-presenter/ || true
+          cp img/icon-256.png dist/bella-presenter/ || true
+          cd dist && 7z a ../bella-presenter-windows-x64.zip bella-presenter
       - name: Download release notes
         uses: actions/download-artifact@v4
         with:
@@ -138,4 +138,4 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           body_path: RELEASE_NOTES.md
-          files: presenters-windows-x64.zip
+          files: bella-presenter-windows-x64.zip

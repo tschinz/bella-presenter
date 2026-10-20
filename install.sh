@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
-# One-line installer for presenters on macOS and Linux, from the latest GitHub release.
+# One-line installer for bella-presenter on macOS and Linux, from the latest GitHub release.
 #
-#   curl -fsSL https://raw.githubusercontent.com/tschinz/presenters/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.sh | bash
 #
-# macOS: installs presenters.app into /Applications (Apple Silicon only).
+# macOS: installs bella-presenter.app into /Applications (Apple Silicon only).
 # Linux: installs the .deb via dpkg (Debian/Ubuntu). On other distros, build from source.
 set -euo pipefail
 
-REPO="tschinz/presenters"
+REPO="tschinz/bella-presenter"
 LATEST_DL="https://github.com/$REPO/releases/latest/download"
 API="https://api.github.com/repos/$REPO/releases/latest"
 
@@ -23,13 +23,13 @@ case "$os" in
       echo "Only Apple Silicon (arm64) is published; detected '$arch'. Build from source: https://github.com/$REPO#build-from-source" >&2
       exit 1
     fi
-    echo "Downloading presenters for macOS (arm64)…"
-    curl -fL "$LATEST_DL/presenters-macos-arm64.zip" -o "$tmp/p.zip"
-    echo "Installing to /Applications/presenters.app…"
-    rm -rf "/Applications/presenters.app"
+    echo "Downloading bella-presenter for macOS (arm64)…"
+    curl -fL "$LATEST_DL/bella-presenter-macos-arm64.zip" -o "$tmp/p.zip"
+    echo "Installing to /Applications/bella-presenter.app…"
+    rm -rf "/Applications/bella-presenter.app"
     unzip -q "$tmp/p.zip" -d /Applications
-    xattr -dr com.apple.quarantine "/Applications/presenters.app" 2>/dev/null || true
-    echo "✓ Installed. Launch 'presenters' from /Applications or Spotlight."
+    xattr -dr com.apple.quarantine "/Applications/bella-presenter.app" 2>/dev/null || true
+    echo "✓ Installed. Launch 'bella-presenter' from /Applications or Spotlight."
     ;;
   Linux)
     if ! command -v dpkg >/dev/null 2>&1; then
@@ -40,10 +40,10 @@ case "$os" in
     url="$(curl -fsSL "$API" | grep -o '"browser_download_url": *"[^"]*\.deb"' | head -1 | sed 's/.*"browser_download_url": *"\([^"]*\)".*/\1/')"
     [ -n "$url" ] || { echo "No .deb asset in the latest release." >&2; exit 1; }
     echo "Downloading $url"
-    curl -fL "$url" -o "$tmp/presenters.deb"
+    curl -fL "$url" -o "$tmp/bella-presenter.deb"
     echo "Installing (needs sudo)…"
-    sudo dpkg -i "$tmp/presenters.deb" || sudo apt-get -f install -y
-    echo "✓ Installed. Launch 'Presenters' from your applications menu."
+    sudo dpkg -i "$tmp/bella-presenter.deb" || sudo apt-get -f install -y
+    echo "✓ Installed. Launch 'bella-presenter' from your applications menu."
     ;;
   *)
     echo "Unsupported OS '$os'. Build from source: https://github.com/$REPO#build-from-source" >&2
