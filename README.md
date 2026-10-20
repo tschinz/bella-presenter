@@ -1,15 +1,15 @@
 ![](https://tianji.zahno.dev/telemetry/clnzoxcy10001vy2ohi4obbi0/cmurtva0b18zkqvxez0rnlp8y.gif)
 <div align="center">
 
-<img src="img/logo.png" alt="presenters logo" width="260">
+<img src="img/logo.png" alt="bella-presenter logo" width="260">
 
-# presenters
+# bella-presenter
 
 **A fast, native dual-screen PDF presenter for Typst & LaTeX slides.**
 
 Runs on macOS · Windows · Linux · Built with [egui](https://github.com/emilk/egui) + [PDFium](https://pdfium.googlesource.com/pdfium/)
 
-[![GitHub Repo stars](https://img.shields.io/github/stars/tschinz/presenters?logo=github)](https://github.com/tschinz/presenters/stargazers) [![GitHub Release](https://img.shields.io/github/v/release/tschinz/presenters?logo=github)](https://github.com/tschinz/presenters/releases/latest) [![Sponsor tschinz](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/tschinz)
+[![GitHub Repo stars](https://img.shields.io/github/stars/tschinz/bella-presenter?logo=github)](https://github.com/tschinz/bella-presenter/stargazers) [![GitHub Release](https://img.shields.io/github/v/release/tschinz/bella-presenter?logo=github)](https://github.com/tschinz/bella-presenter/releases/latest) [![Sponsor tschinz](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/tschinz)
 
 </div>
 
@@ -48,13 +48,13 @@ It stays instant even on large decks (300+ pages) thanks to lazy rendering, a te
 
 ## Install
 
-Grab a prebuilt binary from the [latest release](https://github.com/tschinz/presenters/releases/latest) — PDFium is bundled, so there is nothing else to install:
+Grab a prebuilt binary from the [latest release](https://github.com/tschinz/bella-presenter/releases/latest) — PDFium is bundled, so there is nothing else to install:
 
 | Platform | Asset | Notes |
 | --- | --- | --- |
-| macOS (Apple Silicon) | `presenters-macos-arm64.zip` | ad-hoc-signed `.app`; open via right-click → **Open** the first time |
-| Linux (Debian/Ubuntu) | `rust-presenters_<ver>_amd64.deb` | `sudo dpkg -i` the file |
-| Windows (x64) | `presenters-windows-x64.zip` | portable (`presenters.exe` + `pdfium.dll`) |
+| macOS (Apple Silicon) | `bella-presenter-macos-arm64.zip` | ad-hoc-signed `.app`; open via right-click → **Open** the first time |
+| Linux (Debian/Ubuntu) | `bella-presenter_<ver>_amd64.deb` | `sudo dpkg -i` the file |
+| Windows (x64) | `bella-presenter-windows-x64.zip` | portable (`bella-presenter.exe` + `pdfium.dll`) |
 
 Intel Macs and other Linux distros are not prebuilt — [build from source](#build-from-source).
 
@@ -63,13 +63,13 @@ Intel Macs and other Linux distros are not prebuilt — [build from source](#bui
 **macOS & Linux** — installs the `.app` into `/Applications` (clearing quarantine) or the `.deb` via `dpkg`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/tschinz/presenters/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.sh | bash
 ```
 
-**Windows** (PowerShell) — extracts the portable build to `%LOCALAPPDATA%\Programs\presenters` and adds a Start Menu shortcut:
+**Windows** (PowerShell) — extracts the portable build to `%LOCALAPPDATA%\Programs\bella-presenter` and adds a Start Menu shortcut:
 
 ```powershell
-irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
+irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 | iex
 ```
 
 ## Features
@@ -84,7 +84,7 @@ irm https://raw.githubusercontent.com/tschinz/presenters/main/install.ps1 | iex
 - **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
 - **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; cycle system/dark/light theme from the header.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
-- **Remembers everything.** Window position, panel sizes, fonts, layout, theme, pointer colour, thumbnail strip, and recent files persist between sessions, in a single JSON file (`~/.config/presenter/state.json` on macOS/Linux, `%APPDATA%\presenter\state.json` on Windows).
+- **Remembers everything.** Window position, panel sizes, fonts, layout, theme, pointer colour, thumbnail strip, and recent files persist between sessions, in a single JSON file (`~/.config/bella-presenter/state.json` on macOS/Linux, `%APPDATA%\bella-presenter\state.json` on Windows).
 
 ## Keyboard & mouse shortcuts
 
