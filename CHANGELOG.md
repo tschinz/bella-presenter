@@ -2,6 +2,27 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - 2026-10-20
+
+### 🚀 Features
+
+- *(config)* Store state in bella-presenter config dir with migration ([546e405](https://github.com/tschinz/bella-presenter/commit/546e405deee87c6c4e3e07cfc648dd92162768a9) - zas)
+
+### 💼 Other
+
+- *(release)* Publish bella-presenter assets and update installers ([092006a](https://github.com/tschinz/bella-presenter/commit/092006ac9d1e74ecf60072c6161a8a17905f5e59) - zas)
+
+### 🚜 Refactoring
+
+- Rename crate, binary and bundle to bella-presenter ([a1559b5](https://github.com/tschinz/bella-presenter/commit/a1559b5e5a12f4479b3226898e9c68836e6ac83b) - zas)
+
+### 📚 Documentation
+
+- Point readme, badges and changelog links at bella-presenter ([5829709](https://github.com/tschinz/bella-presenter/commit/5829709ce3311d75ee5f389952af5dd3a1d43289) - zas)
+
+
+**Full Changelog**: [v0.2.0...0.3.0](https://github.com/tschinz/bella-presenter/compare/v0.2.0...0.3.0)
+
 ## [0.2.0] - 2026-10-11
 
 ### 🚀 Features
