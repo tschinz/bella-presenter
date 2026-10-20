@@ -8,7 +8,7 @@
 //! - **Audience window**: a second OS window showing only the slide, on black.
 //! - **Start screen**: a clickable list of recent files when nothing is open.
 //!
-//! All persistent state lives in `~/.config/presenter/state.json` (see [`crate::config`]).
+//! All persistent state lives in `~/.config/bella-presenter/state.json` (see [`crate::config`]).
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -1099,7 +1099,7 @@ impl PresenterApp {
     const THIRDPARTY: &str = include_str!("../assets/thirdparty.md");
     let logo = self.about_logo_texture(ctx);
     let mut open = self.show_about;
-    egui::Window::new("About presenters")
+    egui::Window::new("About bella-presenter")
       .open(&mut open)
       .collapsible(false)
       .resizable(true)
@@ -1110,7 +1110,7 @@ impl PresenterApp {
           let aspect = lw as f32 / lh.max(1) as f32;
           let w = 150.0_f32;
           ui.add(egui::Image::new(egui::load::SizedTexture::new(logo.id(), egui::vec2(w, w / aspect))));
-          ui.heading("presenters");
+          ui.heading("bella-presenter");
           ui.label(env!("CARGO_PKG_DESCRIPTION"));
           ui.add_space(4.0);
           ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
@@ -1158,7 +1158,7 @@ impl PresenterApp {
     egui::CentralPanel::default().show(ctx, |ui| {
       ui.add_space(28.0);
       ui.vertical_centered(|ui| {
-        ui.heading("presenters");
+        ui.heading("bella-presenter");
         ui.add_space(10.0);
         // Faint gray logo, just below the title.
         let [lw, lh] = logo.size();
@@ -1421,11 +1421,11 @@ impl eframe::App for PresenterApp {
     // Window title carries the open file and its page count (kept out of the header).
     let want_title = match self.document.as_ref() {
       Some(doc) => format!(
-        "presenters - {} · {} pages",
+        "bella-presenter - {} · {} pages",
         doc.path().file_name().unwrap_or_default().to_string_lossy(),
         doc.page_count()
       ),
-      None => "presenters".to_owned(),
+      None => "bella-presenter".to_owned(),
     };
     if want_title != self.title {
       self.title.clone_from(&want_title);

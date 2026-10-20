@@ -4,13 +4,13 @@
 
 rust_edition := "2021"
 open := if os() == "linux" { "xdg-open" } else if os() == "macos" { "open" } else { "start \"\" /max" }
-app_name := "rust-presenters"
-crate_name := "rust_presenters"
+app_name := "bella-presenter"
+crate_name := "bella_presenter"
 args := ""
 project_directory := justfile_directory()
 release := `git describe --tags --always 2>/dev/null || echo v0.1.0`
 version := "0.2.0"
-url := "https://github.com/tschinz/rust-presenters"
+url := "https://github.com/tschinz/bella-presenter"
 file := "examples/04-aprog-ptr-en.pdf"
 notes_file := "examples/04-aprog-ptr-notes-en.pdf"
 

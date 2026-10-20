@@ -1,4 +1,4 @@
-//! rust-presenters library crate: the app modules, shared by the binary and tests.
+//! bella-presenter library crate: the app modules, shared by the binary and tests.
 
 pub mod app;
 pub mod camera;

@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use rust_presenters::document::{Document, NotesLayout};
+use bella_presenter::document::{Document, NotesLayout};
 
 #[test]
 fn render_pipeline_smoke() {

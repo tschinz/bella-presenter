@@ -77,7 +77,7 @@ fn candidate_lib_dirs() -> Vec<PathBuf> {
       // cargo-bundle's .deb preserves the resource's relative path, so the library lands
       // under a per-package dir (the package may be named after the crate or the bundle).
       for base in ["lib", "share"] {
-        for pkg in ["rust-presenters", "presenters"] {
+        for pkg in ["bella-presenter", "rust-presenters", "presenters"] {
           dirs.push(parent.join(base).join(pkg).join("third_party/pdfium/lib"));
           dirs.push(parent.join(base).join(pkg));
         }

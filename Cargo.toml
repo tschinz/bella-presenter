@@ -1,16 +1,16 @@
 [package]
-name = "rust-presenters"
+name = "bella-presenter"
 version = "0.2.0"
 edition = "2024"
 description = "Fast native dual-screen presenter for PDF slides"
 authors = ["tschinz"]
 license = "MIT"
-repository = "https://github.com/tschinz/presenters"
+repository = "https://github.com/tschinz/bella-presenter"
 readme = "README.md"
 
 [package.metadata.bundle]
-name = "presenters"
-identifier = "ch.tschinz.rust-presenters"
+name = "bella-presenter"
+identifier = "ch.bellatola.bella-presenter"
 icon = [
     "img/icon-32.png",
     "img/icon-64.png",

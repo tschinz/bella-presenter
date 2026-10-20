@@ -4826,7 +4826,7 @@ MIT License
 ================================================================================
 
 Used by:
-  - rust-presenters 0.1.0
+  - bella-presenter 0.1.0
 
 MIT License
 
