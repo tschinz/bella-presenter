@@ -1,7 +1,7 @@
 //! Persistent state, stored as JSON in a per-OS config directory.
 //!
-//! We deliberately use `~/.config/presenter` on both macOS and Linux (rather than
-//! macOS's `~/Library/Application Support`), and `%APPDATA%\presenter` on Windows.
+//! We deliberately use `~/.config/bella-presenter` on both macOS and Linux (rather than
+//! macOS's `~/Library/Application Support`), and `%APPDATA%\bella-presenter` on Windows.
 //! We manage this file ourselves (rather than via eframe storage) so it always lives
 //! at this location and is written promptly.
 
@@ -9,22 +9,44 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-/// The `presenter` configuration directory for the current OS.
-pub fn config_dir() -> PathBuf {
-  let base = if cfg!(windows) {
+/// The base configuration directory for the current OS.
+fn config_base() -> PathBuf {
+  if cfg!(windows) {
     std::env::var_os("APPDATA").map(PathBuf::from).unwrap_or_else(|| PathBuf::from("."))
   } else {
     std::env::var_os("XDG_CONFIG_HOME")
       .map(PathBuf::from)
       .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))
       .unwrap_or_else(|| PathBuf::from(".config"))
-  };
-  base.join("presenter")
+  }
+}
+
+/// The `bella-presenter` configuration directory for the current OS.
+pub fn config_dir() -> PathBuf {
+  config_base().join("bella-presenter")
+}
+
+/// The pre-rename `presenter` configuration directory (only read, to migrate old state).
+fn legacy_config_dir() -> PathBuf {
+  config_base().join("presenter")
 }
 
 /// Full path to the persisted state file.
 pub fn state_path() -> PathBuf {
   config_dir().join("state.json")
+}
+
+/// Copy `state.json` from the old `presenter` dir into the new one, once.
+fn migrate_legacy_state() {
+  let old = legacy_config_dir().join("state.json");
+  let new = state_path();
+  let Ok(bytes) = std::fs::read(&old) else { return };
+  if let Some(dir) = new.parent()
+    && std::fs::create_dir_all(dir).is_ok()
+    && std::fs::write(&new, &bytes).is_ok()
+  {
+    tracing::info!("migrated state from {} to {}", old.display(), new.display());
+  }
 }
 
 /// A window's position and size (logical pixels).
@@ -177,6 +199,9 @@ impl Default for State {
 impl State {
   /// Load the state file, or defaults if it is missing or unreadable.
   pub fn load() -> Self {
+    if !state_path().exists() {
+      migrate_legacy_state();
+    }
     match std::fs::read_to_string(state_path()) {
       Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
         tracing::warn!("state file unreadable, using defaults: {e}");
