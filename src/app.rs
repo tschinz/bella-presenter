@@ -12,8 +12,8 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use notify::Watcher as _;
@@ -65,12 +65,12 @@ struct SlideInput<'a> {
   strokes: &'a mut Vec<Stroke>,
   /// Whether a stroke is currently being drawn (mouse held since press).
   drawing: &'a mut bool,
-  /// Zoom factor (1.0 = whole slide) and the pan offset (top-left of the visible window,
-  /// in slide-normalized coords). Panning updates the offset.
+  /// Zoom factor (1.0 = whole slide) and the centre of the visible window (slide-normalized
+  /// coords). Panning moves the centre.
   zoom: f32,
-  zoom_offset: &'a mut egui::Vec2,
-  /// Records the current slide's on-screen rect (used for zoom-at-cursor next frame).
-  rect_out: &'a mut Option<egui::Rect>,
+  zoom_center: &'a mut egui::Pos2,
+  /// Records where the current slide is shown (used for zoom-at-cursor next frame).
+  view_out: &'a mut Option<SlideView>,
 }
 
 const HEADER_FONT: f32 = 13.0;
@@ -156,13 +156,13 @@ pub struct PresenterApp {
   drawing: bool,
   /// Accumulated mouse-wheel delta, for scroll-to-navigate.
   scroll_accum: f32,
-  /// Zoom factor of the current slide (1.0 = fit); pan offset within it (slide coords).
+  /// Zoom factor of the current slide (1.0 = fit); centre of the visible window (slide coords).
   zoom: f32,
-  zoom_offset: egui::Vec2,
+  zoom_center: egui::Pos2,
   /// The page the current zoom applies to (zoom resets when the page changes).
   zoom_page: usize,
-  /// The current slide's on-screen rect in the presenter (for zoom-at-cursor).
-  current_slide_rect: Option<egui::Rect>,
+  /// Where the presenter shows the current slide (for zoom-at-cursor).
+  current_slide_view: Option<SlideView>,
   /// Lazily-loaded faint logo shown on the start screen.
   logo: Option<egui::TextureHandle>,
   /// Lazily-loaded full-color logo for the About window.
@@ -229,9 +229,9 @@ impl PresenterApp {
       drawing: false,
       scroll_accum: 0.0,
       zoom: 1.0,
-      zoom_offset: egui::Vec2::ZERO,
+      zoom_center: SLIDE_CENTER,
       zoom_page: 0,
-      current_slide_rect: None,
+      current_slide_view: None,
       logo: None,
       about_logo: None,
       hot_reload: st.hot_reload,
@@ -371,38 +371,27 @@ impl PresenterApp {
     self.drawing = false;
   }
 
-  /// The visible window of the current slide, in slide-normalized coords.
-  fn zoom_uv(&self) -> egui::Rect {
-    zoom_uv_from(self.zoom, self.zoom_offset)
-  }
-
   fn reset_zoom(&mut self) {
     self.zoom = 1.0;
-    self.zoom_offset = egui::Vec2::ZERO;
+    self.zoom_center = SLIDE_CENTER;
   }
 
   /// Multiply the zoom by `factor`, keeping the slide point under `cursor` fixed
-  /// (zoom-to-cursor). `rect` is the on-screen rect of the slide the cursor is over (the
-  /// presenter's or the audience's), used as the anchor. Falls back to zooming about the centre.
-  fn apply_zoom(&mut self, factor: f32, cursor: Option<egui::Pos2>, rect: Option<egui::Rect>) {
+  /// (zoom-to-cursor). `view` is where the slide the cursor is over is shown (the presenter's
+  /// or the audience's), used as the anchor. Falls back to zooming about the centre.
+  fn apply_zoom(&mut self, factor: f32, cursor: Option<egui::Pos2>, view: Option<SlideView>) {
     let new_z = (self.zoom * factor).clamp(MIN_ZOOM, MAX_ZOOM);
     if (new_z - self.zoom).abs() < f32::EPSILON {
       return;
     }
-    let uv = self.zoom_uv();
-    // Anchor: the slide point that should stay under the same screen spot.
-    let (anchor, f) = match (rect, cursor) {
-      (Some(rect), Some(c)) if rect.contains(c) => {
-        let f = egui::vec2((c.x - rect.left()) / rect.width().max(1.0), (c.y - rect.top()) / rect.height().max(1.0));
-        (egui::pos2(uv.min.x + f.x * uv.width(), uv.min.y + f.y * uv.height()), f)
-      }
-      _ => (uv.center(), egui::vec2(0.5, 0.5)),
-    };
-    let s = 1.0 / new_z;
-    let mut off = egui::vec2(anchor.x - f.x * s, anchor.y - f.y * s);
-    clamp_offset(&mut off, s);
+    if let Some(view) = view {
+      let (uv, rect) = view.zoomed(self.zoom, self.zoom_center);
+      self.zoom_center = match cursor.filter(|c| rect.contains(*c)) {
+        Some(c) => view.center_keeping(new_z, screen_to_slide(rect, uv, c), c),
+        None => uv.center(),
+      };
+    }
     self.zoom = new_z;
-    self.zoom_offset = off;
     if self.zoom <= MIN_ZOOM + f32::EPSILON {
       self.reset_zoom();
     }
@@ -653,7 +642,7 @@ impl PresenterApp {
   /// Plain scroll navigates slides (down = next, up = previous). A real wheel reports
   /// discrete Line notches — one slide each, by sign. Trackpad pixel scrolling (Point)
   /// accumulates against a threshold.
-  fn handle_wheel(&mut self, ctx: &egui::Context, anchor: Option<egui::Rect>, strip: Option<egui::Rect>) {
+  fn handle_wheel(&mut self, ctx: &egui::Context, anchor: Option<SlideView>, strip: Option<egui::Rect>) {
     if self.document.is_none() {
       self.scroll_accum = 0.0;
       return;
@@ -1288,8 +1277,8 @@ impl PresenterApp {
       strokes,
       drawing,
       zoom,
-      zoom_offset,
-      current_slide_rect,
+      zoom_center,
+      current_slide_view,
       ..
     } = self;
     let doc = document.as_ref();
@@ -1305,8 +1294,8 @@ impl PresenterApp {
       strokes: strokes.entry(page).or_default(),
       drawing,
       zoom: *zoom,
-      zoom_offset,
-      rect_out: current_slide_rect,
+      zoom_center,
+      view_out: current_slide_view,
     });
 
     if !has_notes {
@@ -1480,7 +1469,7 @@ impl eframe::App for PresenterApp {
       }
     }
     // Mouse-wheel navigation / zoom on the presenter window, anchored at its current slide.
-    let anchor = self.current_slide_rect;
+    let anchor = self.current_slide_view;
     let strip = self.thumb_rect;
     self.handle_wheel(ctx, anchor, strip);
     self.handle_dropped_files(ctx);
@@ -1541,7 +1530,7 @@ impl PresenterApp {
   /// drawing, and Ctrl/Cmd+drag panning — all against the shared state, so annotations and
   /// zoom mirror between the two windows. Returns the on-screen slide rect (for wheel
   /// zoom-to-cursor) and whether the slide was double-clicked (for fullscreen toggle).
-  fn audience_slide(&mut self, ui: &mut egui::Ui, vctx: &egui::Context) -> (Option<egui::Rect>, bool) {
+  fn audience_slide(&mut self, ui: &mut egui::Ui, vctx: &egui::Context) -> (Option<SlideView>, bool) {
     if self.blanked {
       return (None, false);
     }
@@ -1550,12 +1539,11 @@ impl PresenterApp {
     };
     let page = self.session.current();
     let aspect = doc.slide_aspect(page);
-    let uv = self.zoom_uv();
-    let res = self.zoom.clamp(1.0, MAX_ZOOM_RENDER);
-    let Some(rect) = draw_slide_region(ui, vctx, &mut self.cache, doc, page, Region::Slide, aspect, uv, res) else {
+    let zoom = (self.zoom, self.zoom_center);
+    let Some((view, rect, uv)) = draw_slide_region(ui, vctx, &mut self.cache, doc, page, Region::Slide, aspect, zoom) else {
       return (None, false);
     };
-    let mut rect_sink = None;
+    let mut view_sink = None;
     let mut inp = SlideInput {
       mode: self.mode,
       size: self.pointer_size,
@@ -1564,11 +1552,11 @@ impl PresenterApp {
       strokes: self.strokes.entry(page).or_default(),
       drawing: &mut self.drawing,
       zoom: self.zoom,
-      zoom_offset: &mut self.zoom_offset,
-      rect_out: &mut rect_sink,
+      zoom_center: &mut self.zoom_center,
+      view_out: &mut view_sink,
     };
     let resp = process_slide_input(ui, rect, uv, &mut inp);
-    (Some(rect), resp.double_clicked())
+    (Some(view), resp.double_clicked())
   }
 
   /// The audience window: only the slide, on black. Double-click toggles fullscreen;
@@ -1713,13 +1701,10 @@ fn render_pane(
 
   match (page, aspect) {
     (Some(p), Some(a)) => {
-      let (uv, res) = match &input {
-        Some(inp) => (zoom_uv_from(inp.zoom, *inp.zoom_offset), inp.zoom.clamp(1.0, MAX_ZOOM_RENDER)),
-        None => (full_uv(), 1.0),
-      };
-      let rect = draw_slide_region(ui, ctx, cache, doc, p, region, a, uv, res);
-      if let (Some(mut inp), Some(rect)) = (input, rect) {
-        *inp.rect_out = Some(rect);
+      let zoom = input.as_ref().map_or((1.0, SLIDE_CENTER), |inp| (inp.zoom, *inp.zoom_center));
+      let shown = draw_slide_region(ui, ctx, cache, doc, p, region, a, zoom);
+      if let (Some(mut inp), Some((view, rect, uv))) = (input, shown) {
+        *inp.view_out = Some(view);
         let _ = process_slide_input(ui, rect, uv, &mut inp);
       }
     }
@@ -1741,7 +1726,7 @@ fn render_pane(
 /// the page's strokes and the pointer dot on top.
 ///
 /// Shared by the presenter's current-slide pane and the audience window, both of which
-/// drive the same shared state (`inp.pointer`, `inp.strokes`, `inp.zoom_offset`). To avoid
+/// drive the same shared state (`inp.pointer`, `inp.strokes`, `inp.zoom_center`). To avoid
 /// the two windows fighting over the pointer each frame, a window only *updates* the
 /// pointer/drawing state while the OS pointer is inside that window (or a drag started
 /// there); at most one window holds the pointer at a time. The strokes and dot are always
@@ -1760,11 +1745,8 @@ fn process_slide_input(ui: &mut egui::Ui, rect: egui::Rect, uv: egui::Rect, inp:
       *inp.pointer = None;
       *inp.drawing = false;
       if resp.dragged() && inp.zoom > 1.0 {
-        let d = resp.drag_delta();
-        let s = 1.0 / inp.zoom;
-        let mut off = *inp.zoom_offset - egui::vec2(d.x / rect.width().max(1.0) * s, d.y / rect.height().max(1.0) * s);
-        clamp_offset(&mut off, s);
-        *inp.zoom_offset = off;
+        let d = resp.drag_delta() / rect.size().max(egui::Vec2::splat(1.0)) * uv.size();
+        *inp.zoom_center = clamp_center(uv.center() - d, uv.size());
       }
     } else {
       match inp.mode {
@@ -1869,22 +1851,50 @@ fn theme_pref(t: config::Theme) -> egui::ThemePreference {
   }
 }
 
-/// The whole-slide UV window (no zoom).
-fn full_uv() -> egui::Rect {
-  egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0))
+/// The middle of a slide (slide-normalized coords): the zoom centre when not zoomed.
+const SLIDE_CENTER: egui::Pos2 = egui::pos2(0.5, 0.5);
+
+/// Where a zoomable slide is shown: the area it may fill and its fitted size there at zoom 1.
+#[derive(Clone, Copy, Debug)]
+struct SlideView {
+  area: egui::Rect,
+  fit: egui::Vec2,
 }
 
-/// The visible slide window for a zoom factor and pan offset (slide-normalized coords).
-fn zoom_uv_from(zoom: f32, offset: egui::Vec2) -> egui::Rect {
-  let s = 1.0 / zoom.max(1.0);
-  egui::Rect::from_min_size(egui::pos2(offset.x, offset.y), egui::vec2(s, s))
+impl SlideView {
+  /// The slide of width/height `aspect` fitted (letterboxed) into `area`.
+  fn new(area: egui::Rect, aspect: f32) -> Self {
+    let (mut w, mut h) = (area.width(), area.width() / aspect);
+    if h > area.height() {
+      h = area.height();
+      w = area.height() * aspect;
+    }
+    Self { area, fit: egui::vec2(w, h) }
+  }
+
+  /// The visible slide window (slide-normalized) and its on-screen rect at `zoom` around
+  /// `center`. Zooming grows the slide past its fitted size until it fills the whole area,
+  /// so a portrait page also widens into its side bars instead of staying letterboxed.
+  fn zoomed(&self, zoom: f32, center: egui::Pos2) -> (egui::Rect, egui::Rect) {
+    let scaled = self.fit * zoom.max(1.0);
+    let shown = scaled.min(self.area.size());
+    let size = shown / scaled.max(egui::Vec2::splat(1e-6));
+    let uv = egui::Rect::from_center_size(clamp_center(center, size), size);
+    (uv, egui::Rect::from_center_size(self.area.center(), shown))
+  }
+
+  /// The zoom centre that keeps slide point `anchor` under screen point `cursor` at `zoom`.
+  fn center_keeping(&self, zoom: f32, anchor: egui::Pos2, cursor: egui::Pos2) -> egui::Pos2 {
+    let (uv, rect) = self.zoomed(zoom, anchor);
+    let min = anchor - (cursor - rect.min) / (self.fit * zoom).max(egui::Vec2::splat(1e-6));
+    clamp_center(min + uv.size() * 0.5, uv.size())
+  }
 }
 
-/// Clamp a pan offset so the visible window (size `s`) stays within the slide.
-fn clamp_offset(off: &mut egui::Vec2, s: f32) {
-  let max = (1.0 - s).max(0.0);
-  off.x = off.x.clamp(0.0, max);
-  off.y = off.y.clamp(0.0, max);
+/// Clamp a zoom centre so the visible window of `size` stays within the slide.
+fn clamp_center(c: egui::Pos2, size: egui::Vec2) -> egui::Pos2 {
+  let half = size * 0.5;
+  egui::pos2(c.x.clamp(half.x, (1.0 - half.x).max(half.x)), c.y.clamp(half.y, (1.0 - half.y).max(half.y)))
 }
 
 /// Map a slide-normalized point to screen, given the visible `uv` window shown in `rect`.
@@ -1939,9 +1949,9 @@ fn draw_strokes(painter: &egui::Painter, rect: egui::Rect, uv: egui::Rect, strok
   }
 }
 
-/// Draw an aspect-fitted page region into the available area (letterboxed), showing only
-/// the `uv` sub-window (for zoom) and rendering at `res_scale`× resolution for crispness.
-/// Returns the on-screen rect the image occupies.
+/// Draw an aspect-fitted page region into the available area (letterboxed), zoomed by
+/// `(factor, centre)` (see [`SlideView::zoomed`]) and rendered at extra resolution when zoomed
+/// for crispness. Returns where it is shown, the on-screen rect and the visible uv window.
 #[allow(clippy::too_many_arguments)]
 fn draw_slide_region(
   ui: &mut egui::Ui,
@@ -1951,9 +1961,8 @@ fn draw_slide_region(
   page: usize,
   region: Region,
   aspect: f32,
-  uv: egui::Rect,
-  res_scale: f32,
-) -> Option<egui::Rect> {
+  (zoom, center): (f32, egui::Pos2),
+) -> Option<(SlideView, egui::Rect, egui::Rect)> {
   let full = ui.available_rect_before_wrap();
   // Claim the whole available area up front. A resizable panel stores the height (or width)
   // of its content's actual rect; if we only claimed the letterboxed image below, a vertical
@@ -1963,12 +1972,10 @@ fn draw_slide_region(
   ui.allocate_rect(full, egui::Sense::hover());
   let ppp = ctx.pixels_per_point();
 
-  let (mut w, mut h) = (full.width(), full.width() / aspect);
-  if h > full.height() {
-    h = full.height();
-    w = full.height() * aspect;
-  }
-  let img_rect = egui::Rect::from_center_size(full.center(), egui::vec2(w, h));
+  let view = SlideView::new(full, aspect);
+  let (uv, img_rect) = view.zoomed(zoom, center);
+  let (w, h) = (view.fit.x, view.fit.y);
+  let res_scale = zoom.clamp(1.0, MAX_ZOOM_RENDER);
 
   let mut pw = (w * ppp * res_scale).round().max(1.0) as u32;
   let mut ph = (h * ppp * res_scale).round().max(1.0) as u32;
@@ -1981,7 +1988,7 @@ fn draw_slide_region(
     egui::Image::new(egui::load::SizedTexture::new(tex.id(), egui::vec2(w, h)))
       .uv(uv)
       .paint_at(ui, img_rect);
-    Some(img_rect)
+    Some((view, img_rect, uv))
   } else {
     egui::Spinner::new().paint_at(ui, img_rect);
     None
@@ -2060,5 +2067,41 @@ impl TextureCache {
       }
     }
     Some(tex)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  fn wide_area() -> egui::Rect {
+    egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(1600.0, 900.0))
+  }
+
+  #[test]
+  fn a_zoomed_portrait_page_widens_into_the_side_bars() {
+    let view = SlideView::new(wide_area(), 0.5);
+    assert_eq!(view.zoomed(1.0, SLIDE_CENTER).1.width(), 450.0);
+    let (uv, rect) = view.zoomed(4.0, SLIDE_CENTER);
+    assert_eq!(rect, wide_area(), "fills the whole window");
+    assert!((uv.width() - 1600.0 / 1800.0).abs() < 1e-5 && (uv.height() - 0.25).abs() < 1e-5, "{uv:?}");
+  }
+
+  #[test]
+  fn zooming_at_the_cursor_keeps_the_point_under_it() {
+    let view = SlideView::new(wide_area(), 0.5);
+    let cursor = egui::pos2(820.0, 300.0);
+    let (uv, rect) = view.zoomed(1.0, SLIDE_CENTER);
+    let anchor = screen_to_slide(rect, uv, cursor);
+    let center = view.center_keeping(4.0, anchor, cursor);
+    let (uv, rect) = view.zoomed(4.0, center);
+    let moved = slide_to_screen(rect, uv, anchor);
+    assert!((moved - cursor).length() < 0.01, "{moved:?}");
+  }
+
+  #[test]
+  fn the_visible_window_stays_on_the_slide() {
+    let (uv, _) = SlideView::new(wide_area(), 16.0 / 9.0).zoomed(2.0, egui::pos2(0.99, 0.0));
+    assert!(uv.min.x >= 0.0 && uv.min.y >= 0.0 && uv.max.x <= 1.0 && uv.max.y <= 1.0, "{uv:?}");
   }
 }
