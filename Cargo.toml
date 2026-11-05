@@ -11,13 +11,9 @@ readme = "README.md"
 [package.metadata.bundle]
 name = "bella-presenter"
 identifier = "ch.bellatola.bella-presenter"
-icon = [
-    "img/icon-32.png",
-    "img/icon-64.png",
-    "img/icon-128.png",
-    "img/icon-256.png",
-    "img/icon-512.png",
-]
+# One real .icns (built with iconutil) instead of loose PNGs: cargo-bundle mislabels
+# 64/256/512 px PNGs as retina slots, which scrambled the icon in Spotlight.
+icon = ["bundle/bella-presenter.icns"]
 # Ship the platform's PDFium dynamic library inside the bundle. Populate this folder
 # with `just setup-pdfium` before bundling.
 resources = ["third_party/pdfium/lib"]
