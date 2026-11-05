@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-11-05
+
+### 🚀 Features
+
+- *(bundle)* Offer bella-presenter in "open with" for pdf files ([b1a703a](https://github.com/tschinz/bella-presenter/commit/b1a703aff014064117fc79082e92c322aa9ab4c5) - zas)
+- *(platform)* Open pdfs handed over by macos "open with" ([11ab311](https://github.com/tschinz/bella-presenter/commit/11ab3112ce57234f61cfd20ea80a934ff1fa3a63) - zas)
+- *(update)* Offer and install new github releases at start ([c970644](https://github.com/tschinz/bella-presenter/commit/c9706441552bed0e89eb05d9311f8bdcd941eb10) - zas)
+
+### 🐛 Bug Fixes
+
+- *(bundle)* Ship a complete .icns so the macos icon is not scrambled ([042d9d2](https://github.com/tschinz/bella-presenter/commit/042d9d212997d9b14cbb1d9bcac1ac134ce88004) - zas)
+- *(zoom)* Grow zoomed slides into the letterbox bars ([2b8d07b](https://github.com/tschinz/bella-presenter/commit/2b8d07be3148438b524a843f77067997562eaa95) - zas)
+
+### 📚 Documentation
+
+- *(readme)* Describe open with, updates and zoom into side bars ([d015c1e](https://github.com/tschinz/bella-presenter/commit/d015c1ec077e2483119c34c2bd59a3b298e79ba7) - zas)
+
+
+**Full Changelog**: [v0.3.0...v0.4.0](https://github.com/tschinz/bella-presenter/compare/v0.3.0...v0.4.0)
+
 ## [0.3.0] - 2026-10-20
 
 ### 🚀 Features
