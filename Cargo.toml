@@ -25,7 +25,12 @@ screen it shows the current slide, a next-slide preview, speaker notes, and a ta
 timer; on the audience screen it shows just the slide, fullscreen.
 """
 
-# Required for webcam access on macOS (without it the camera fails silently).
+# Offer the app in "Open with" for PDFs on Linux (.desktop MimeType + file argument).
+[package.metadata.bundle.linux]
+mime_types = ["application/pdf"]
+exec_args = "%f"
+
+# Camera usage text (without it the webcam fails silently) and PDF document type ("Open with").
 [package.metadata.bundle.osx]
 info_plist_exts = ["bundle/info-ext.plist"]
 

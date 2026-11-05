@@ -27,5 +27,10 @@ $shortcut  = (New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $st
 $shortcut.TargetPath = $exe
 $shortcut.Save()
 
+# Register as an "Open with" choice for .pdf (per-user, no admin; does not change the default app).
+$app = 'HKCU:\Software\Classes\Applications\bella-presenter.exe'
+New-Item -Force -Path "$app\shell\open\command" -Value "`"$exe`" `"%1`"" | Out-Null
+New-Item -Force -Path 'HKCU:\Software\Classes\.pdf\OpenWithList\bella-presenter.exe' | Out-Null
+
 Write-Host "✓ Installed. Launch 'bella-presenter' from the Start Menu, or run:"
 Write-Host "    $exe"
