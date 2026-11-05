@@ -8,6 +8,7 @@ pub mod platform;
 pub mod render;
 pub mod screen;
 pub mod session;
+pub mod update;
 
 /// The application icon (embedded PNG), for use as a window icon.
 pub fn app_icon() -> egui::IconData {

@@ -174,6 +174,8 @@ pub struct State {
   /// Reload the open PDF when its file changes on disk.
   pub hot_reload: bool,
   pub camera: CameraSettings,
+  /// A release version the user chose to skip: not offered again at start.
+  pub skipped_update: String,
 }
 
 impl Default for State {
@@ -192,6 +194,7 @@ impl Default for State {
       theme: Theme::System,
       hot_reload: true,
       camera: CameraSettings::default(),
+      skipped_update: String::new(),
     }
   }
 }

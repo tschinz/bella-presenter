@@ -13,7 +13,7 @@
 use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, mpsc};
 use std::time::{Duration, Instant};
 
 use notify::Watcher as _;
@@ -21,6 +21,7 @@ use notify::Watcher as _;
 use crate::config::{self, Geometry};
 use crate::document::Document;
 use crate::session::{Session, format_elapsed};
+use crate::update::{self, Release};
 
 /// Which piece of the presentation a panel shows.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -145,6 +146,10 @@ pub struct PresenterApp {
   represent_at: Option<Instant>,
   show_shortcuts: bool,
   show_about: bool,
+  /// The update check at start and the offer it leads to.
+  update: UpdateStep,
+  /// A release version the user chose to skip (persisted).
+  skipped_update: String,
   /// Pointer vs. drawing (toggle with D).
   mode: InputMode,
   /// Laser-pointer position, normalized (0..1) within the slide, while the mouse
@@ -224,6 +229,8 @@ impl PresenterApp {
       represent_at: None,
       show_shortcuts: false,
       show_about: false,
+      update: UpdateStep::Checking(in_background(&cc.egui_ctx, update::check)),
+      skipped_update: st.skipped_update.clone(),
       mode: InputMode::Pointer,
       pointer_norm: None,
       strokes: HashMap::new(),
@@ -330,6 +337,7 @@ impl PresenterApp {
       theme: self.theme,
       hot_reload: self.hot_reload,
       camera: self.camera.settings.clone(),
+      skipped_update: self.skipped_update.clone(),
     }
   }
 
@@ -1140,6 +1148,96 @@ impl PresenterApp {
     self.show_about = open;
   }
 
+  /// Picks up the background update check and install, and offers a newer release (never
+  /// while presenting, so a talk is not interrupted). Installing ends with a restart.
+  fn update_window(&mut self, ctx: &egui::Context) {
+    match &self.update {
+      UpdateStep::Checking(rx) => match rx.try_recv() {
+        Ok(Ok(Some(release))) if release.version != self.skipped_update => self.update = UpdateStep::Offer(release),
+        Ok(Ok(_)) | Err(mpsc::TryRecvError::Disconnected) => self.update = UpdateStep::Idle,
+        Ok(Err(error)) => {
+          tracing::info!(%error, "update check failed");
+          self.update = UpdateStep::Idle;
+        }
+        Err(mpsc::TryRecvError::Empty) => {}
+      },
+      UpdateStep::Installing(_, rx) => match rx.try_recv() {
+        Ok(Ok(program)) => {
+          self.save_now();
+          crate::platform::relaunch(&program);
+          self.update = UpdateStep::Idle;
+          ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+          return;
+        }
+        Ok(Err(error)) => self.update = UpdateStep::Failed(error),
+        Err(mpsc::TryRecvError::Disconnected) => self.update = UpdateStep::Failed("the installer stopped".to_string()),
+        Err(mpsc::TryRecvError::Empty) => {}
+      },
+      UpdateStep::Idle | UpdateStep::Offer(_) | UpdateStep::Failed(_) => {}
+    }
+    if self.presenting {
+      return;
+    }
+    let mut next = None;
+    let window = |title: &'static str| {
+      egui::Window::new(title)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+    };
+    match &self.update {
+      UpdateStep::Offer(release) => {
+        window("Update available").show(ctx, |ui| {
+          ui.label(format!(
+            "bella-presenter {} is available (you have {}).",
+            release.version,
+            env!("CARGO_PKG_VERSION")
+          ));
+          if !release.notes.trim().is_empty() {
+            egui::CollapsingHeader::new("Release notes").show(ui, |ui| {
+              egui::ScrollArea::vertical().max_height(240.0).show(ui, |ui| ui.label(&release.notes));
+            });
+          }
+          ui.add_space(6.0);
+          ui.horizontal(|ui| {
+            if ui.button("Install and restart").clicked() {
+              let r = release.clone();
+              next = Some(UpdateStep::Installing(release.clone(), in_background(ctx, move || update::install(&r))));
+            }
+            if ui.button("Skip this version").clicked() {
+              self.skipped_update = release.version.clone();
+              self.dirty = true;
+              next = Some(UpdateStep::Idle);
+            }
+            if ui.button("Later").clicked() {
+              next = Some(UpdateStep::Idle);
+            }
+          });
+        });
+      }
+      UpdateStep::Installing(release, _) => {
+        window("Updating").show(ctx, |ui| {
+          ui.horizontal(|ui| {
+            ui.spinner();
+            ui.label(format!("Downloading and installing bella-presenter {}…", release.version));
+          });
+        });
+      }
+      UpdateStep::Failed(error) => {
+        window("Update failed").show(ctx, |ui| {
+          ui.label(error);
+          if ui.button("Close").clicked() {
+            next = Some(UpdateStep::Idle);
+          }
+        });
+      }
+      UpdateStep::Idle | UpdateStep::Checking(_) => {}
+    }
+    if let Some(step) = next {
+      self.update = step;
+    }
+  }
+
   /// The screen shown when no document is open: a faint logo watermark plus a
   /// recent-files list to click, or a prompt to open one.
   fn start_screen(&mut self, ctx: &egui::Context) {
@@ -1493,6 +1591,7 @@ impl eframe::App for PresenterApp {
     self.thumbnails(ctx);
     self.shortcuts_window(ctx);
     self.about_window(ctx);
+    self.update_window(ctx);
 
     if self.document.is_none() {
       self.start_screen(ctx);
@@ -1852,6 +1951,27 @@ fn theme_pref(t: config::Theme) -> egui::ThemePreference {
     config::Theme::Dark => egui::ThemePreference::Dark,
     config::Theme::Light => egui::ThemePreference::Light,
   }
+}
+
+/// Where the update offer stands (see [`PresenterApp::update_window`]).
+enum UpdateStep {
+  Idle,
+  Checking(mpsc::Receiver<Result<Option<Release>, String>>),
+  Offer(Release),
+  /// Downloading and installing; the result is the program to restart.
+  Installing(Release, mpsc::Receiver<Result<PathBuf, String>>),
+  Failed(String),
+}
+
+/// Runs `work` on its own thread and wakes the UI when its result is ready.
+fn in_background<T: Send + 'static>(ctx: &egui::Context, work: impl FnOnce() -> T + Send + 'static) -> mpsc::Receiver<T> {
+  let (tx, rx) = mpsc::channel();
+  let ctx = ctx.clone();
+  std::thread::spawn(move || {
+    let _ = tx.send(work());
+    ctx.request_repaint();
+  });
+  rx
 }
 
 /// The middle of a slide (slide-normalized coords): the zoom centre when not zoomed.
