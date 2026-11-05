@@ -54,6 +54,20 @@ notify = "8.2.0"
 nokhwa = { version = "0.10.11", features = ["input-native"] }
 ort = "2.0.0-rc.13"
 
+# macOS "Open with" / double-click delivers the file as an Apple Event, not as an argument.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std",
+    "NSAppleEventDescriptor",
+    "NSAppleEventManager",
+    "NSNotification",
+    "NSObject",
+    "NSString",
+    "NSURL",
+    "objc2-core-services",
+] }
+
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering
 

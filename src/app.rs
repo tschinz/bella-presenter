@@ -185,7 +185,8 @@ pub struct PresenterApp {
 }
 
 impl PresenterApp {
-  pub fn new(_cc: &eframe::CreationContext<'_>, initial: Option<&Path>) -> Self {
+  pub fn new(cc: &eframe::CreationContext<'_>, initial: Option<&Path>) -> Self {
+    crate::platform::wake_on_opened_files(&cc.egui_ctx);
     let st = config::State::load();
     // Prune recent entries whose file no longer exists on disk (moved/deleted).
     let mut recent = st.recent;
@@ -542,7 +543,7 @@ impl PresenterApp {
     }
   }
 
-  /// Open the first PDF dropped onto the window (drag & drop).
+  /// Open the first PDF dropped onto the window (drag & drop), or one the OS asked us to open.
   fn handle_dropped_files(&mut self, ctx: &egui::Context) {
     let dropped = ctx.input(|i| {
       i.raw
@@ -551,7 +552,9 @@ impl PresenterApp {
         .filter_map(|f| f.path.clone())
         .find(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("pdf")))
     });
-    if let Some(path) = dropped {
+    // Files the OS hands over ("Open with", double-click on macOS): the latest one wins.
+    let opened = crate::platform::take_opened_files().pop();
+    if let Some(path) = dropped.or(opened) {
       self.open(&path);
     }
   }

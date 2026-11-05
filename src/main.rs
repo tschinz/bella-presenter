@@ -55,6 +55,7 @@ fn main() -> eframe::Result<()> {
     ..Default::default()
   };
 
+  bella_presenter::platform::listen_for_opened_files();
   eframe::run_native(
     "bella-presenter",
     options,
