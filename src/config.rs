@@ -202,7 +202,10 @@ impl State {
     }
     match std::fs::read_to_string(state_path()) {
       Ok(text) => serde_json::from_str(&text).unwrap_or_else(|e| {
-        tracing::warn!("state file unreadable, using defaults: {e}");
+        // Keep the unreadable file: the next save would otherwise overwrite the recent list for good.
+        let backup = state_path().with_extension("json.bak");
+        tracing::warn!("state file unreadable, using defaults (kept as {}): {e}", backup.display());
+        let _ = std::fs::copy(state_path(), backup);
         State::default()
       }),
       Err(_) => State::default(),
@@ -220,7 +223,9 @@ impl State {
     }
     match serde_json::to_string_pretty(self) {
       Ok(json) => {
-        if let Err(e) = std::fs::write(&path, json) {
+        // Write aside, then rename over the old file: a crash mid-write leaves the old state intact.
+        let tmp = path.with_extension("json.tmp");
+        if let Err(e) = std::fs::write(&tmp, json).and_then(|()| std::fs::rename(&tmp, &path)) {
           tracing::warn!("could not write state {}: {e}", path.display());
         }
       }
