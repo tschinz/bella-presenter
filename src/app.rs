@@ -99,8 +99,10 @@ const POINTER_STEP: f32 = 0.25;
 const NUM_LAYOUTS: usize = 4;
 const MAX_RECENT: usize = 15;
 /// Resizable bounds for the thumbnail strip panel (total height, in points).
-const MIN_STRIP_H: f32 = 70.0;
+const MIN_STRIP_H: f32 = 80.0;
 const MAX_STRIP_H: f32 = 420.0;
+/// Height of the slide number below each thumbnail.
+const THUMB_LABEL_H: f32 = 18.0;
 const SAVE_THROTTLE: Duration = Duration::from_millis(1200);
 const MIN_ZOOM: f32 = 1.0;
 const MAX_ZOOM: f32 = 8.0;
@@ -1320,8 +1322,9 @@ impl PresenterApp {
     let (Some(doc), count) = (self.document.as_ref(), self.session.page_count()) else {
       return div().into_any_element();
     };
-    // Size the thumbnails to the strip height, reserving room for the padding and the scrollbar.
-    let thumb_h = (self.thumb_height - PAD - 16.0).max(36.0);
+    // Size the thumbnails to the strip height, reserving room for the padding, the scrollbar and
+    // the slide number below each one.
+    let thumb_h = (self.thumb_height - PAD - 16.0 - THUMB_LABEL_H).max(36.0);
     let thumb_w = thumb_h * doc.slide_aspect(0).max(0.1);
     // Re-centre on the current slide only when it changes, so manual scrolling is preserved.
     let current = self.session.current();
@@ -1329,7 +1332,7 @@ impl PresenterApp {
       self.thumb_follow_last = current;
       self.thumb_scroll.scroll_to_item(current, ScrollStrategy::Center);
     }
-    let sizes = Rc::new(vec![size(px(thumb_w + GAP), px(thumb_h)); count]);
+    let sizes = Rc::new(vec![size(px(thumb_w + GAP), px(thumb_h + THUMB_LABEL_H)); count]);
     div()
       .size_full()
       .pt(px(PAD))
@@ -1356,36 +1359,34 @@ impl PresenterApp {
     } else {
       (thumb_h * a, thumb_h)
     };
-    div()
+    let current = i == self.session.current();
+    v_flex()
       .id(("thumb", i))
-      .relative()
       .w(px(thumb_w))
-      .h(px(thumb_h))
-      .flex()
       .items_center()
-      .justify_center()
       .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
         app.session.goto(i as isize);
         cx.notify();
       }))
       .child(
-        div()
-          .w(px(w))
-          .h(px(h))
-          .rounded(px(2.0))
-          .bg(muted)
-          .hover(|s| s.bg(hover))
-          .when(i == self.session.current(), |d| d.border(px(3.0)).border_color(selected))
-          .child(self.slide(i, Region::Slide, a, Surface::Thumb, cx)),
+        div().w(px(thumb_w)).h(px(thumb_h)).flex().items_center().justify_center().child(
+          div()
+            .w(px(w))
+            .h(px(h))
+            .rounded(px(2.0))
+            .bg(muted)
+            .hover(|s| s.bg(hover))
+            .when(current, |d| d.border(px(3.0)).border_color(selected))
+            .child(self.slide(i, Region::Slide, a, Surface::Thumb, cx)),
+        ),
       )
-      // Slide number, bottom-left of the slot.
+      // The slide number, centred below the picture (the current one in the accent colour).
       .child(
         div()
-          .absolute()
-          .left(px(2.0))
-          .bottom(px(-1.0))
+          .h(px(THUMB_LABEL_H))
           .text_xs()
-          .text_color(weak)
+          .text_color(if current { selected } else { weak })
+          .when(current, |d| d.font_weight(FontWeight::BOLD))
           .child(format!("{}", i + 1)),
       )
       .into_any_element()
