@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.1] - 2026-11-07
+
+### 🚀 Features
+
+- *(ui)* Show the slide number below each thumbnail ([bc4650b](https://github.com/tschinz/bella-presenter/commit/bc4650b2925d1df44cedd9a2e9f7c4ee065a70fa) - zas)
+- *(ui)* Use the header's small text on the start screen ([fca407c](https://github.com/tschinz/bella-presenter/commit/fca407c2803ea6f272498e6cdefc2216983b5086) - zas)
+- *(ui)* Show only icons in the header and timer controls in the footer ([b2dbeb6](https://github.com/tschinz/bella-presenter/commit/b2dbeb6a5a32ecc490116baaf8355ebe45bc3fa9) - zas)
+- *(camera)* Show the active camera choice in the accent colour ([d68edec](https://github.com/tschinz/bella-presenter/commit/d68edecb5fffb5447846133086b9e95a60530c1e) - zas)
+
+### 📚 Documentation
+
+- *(readme)* Refresh the screenshots ([ad8935f](https://github.com/tschinz/bella-presenter/commit/ad8935f202363752ef1e817e7d6610bc06545b8d) - zas)
+- *(readme)* Show the round camera overlay and fix the audience alt text ([305326d](https://github.com/tschinz/bella-presenter/commit/305326dd95d475dc7fb17ad3ae4c90030b05d798) - zas)
+
+
+**Full Changelog**: [v0.5.0...v0.5.1](https://github.com/tschinz/bella-presenter/compare/v0.5.0...v0.5.1)
+
 ## [0.5.0] - 2026-11-07
 
 ### 🚀 Features
