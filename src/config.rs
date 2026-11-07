@@ -77,9 +77,9 @@ pub struct RecentEntry {
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Corner {
   TopLeft,
+  #[default]
   TopRight,
   BottomLeft,
-  #[default]
   BottomRight,
 }
 
