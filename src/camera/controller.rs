@@ -531,13 +531,15 @@ fn choice_row<T: Copy + PartialEq + 'static>(
     .gap_1()
     .child(div().mr_1().child(label))
     .children(choices.iter().enumerate().map(|(i, &(value, text, icon))| {
-      let button = Button::new((label, i));
+      // The active choice in the accent colour: a merely "selected" button looks almost like the rest.
+      let active = value == current;
+      let button = if active { Button::new((label, i)).primary() } else { Button::new((label, i)) };
       match icon {
         Some(icon) => button.icon(Icon::new(icon)).tooltip(text),
         None => button.label(text),
       }
       .xsmall()
-      .selected(value == current)
+      .selected(active)
       .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
         set(&mut app.camera.settings, value);
         app.dirty = true;

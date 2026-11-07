@@ -98,6 +98,17 @@ pub fn apply(mode: config::Theme, window: &mut Window, cx: &mut App) {
     theme.colors.list_even = c.row_alt;
     theme.colors.list_hover = c.row_alt;
     theme.colors.list_active = c.cursor;
+    // Primary buttons (e.g. the active camera choice) in the accent blue, like the current slide.
+    theme.colors.primary = c.cursor;
+    theme.colors.primary_hover = Hsla {
+      l: c.cursor.l + 0.06,
+      ..c.cursor
+    };
+    theme.colors.primary_active = Hsla {
+      l: c.cursor.l - 0.06,
+      ..c.cursor
+    };
+    theme.colors.primary_foreground = c.cursor_text;
     theme.colors.accent = c.cursor;
     theme.colors.accent_foreground = c.cursor_text;
     theme.colors.selection = c.cursor;
