@@ -1399,17 +1399,19 @@ impl PresenterApp {
     let (muted, hover, border) = (theme.muted_foreground, theme.list_hover, theme.border);
     let (logo, aspect) = self.logo.clone();
     let logo_w = 220.0_f32.min(f32::from(window.viewport_size().width) * 0.6);
+    // The same small text as the header: this screen is for setting up, not for the audience.
     let top = v_flex()
       .items_center()
-      .pt(px(28.0))
-      .gap(px(10.0))
-      .child(div().text_2xl().font_weight(FontWeight::BOLD).child(APP_NAME))
+      .text_xs()
+      .pt(px(20.0))
+      .gap(px(8.0))
+      .child(div().text_sm().font_weight(FontWeight::BOLD).child(APP_NAME))
       .child(img(logo).w(px(logo_w)).h(px(logo_w / aspect)).opacity(0.35))
       .child(
         Button::new("start-open")
           .icon(Icon::new(Lucide::FolderOpen))
           .label("Open a PDF… (O)")
-          .large()
+          .xsmall()
           .on_click(cx.listener(|app, _: &ClickEvent, _, cx| app.pick_file(cx))),
       )
       .child(div().text_color(muted).child("… or drag & drop a PDF onto the window"));
@@ -1427,21 +1429,21 @@ impl PresenterApp {
       h_flex()
         .id(("recent", i))
         .w_full()
-        .h(px(44.0))
-        .px(px(12.0))
+        .h(px(28.0))
+        .px(px(8.0))
         .gap_1()
         .rounded(px(5.0))
         .cursor_pointer()
         .hover(|s| s.bg(hover))
         .tooltip(move |window, cx| Tooltip::new(tip.clone()).build(window, cx))
         .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| app.open(&open, cx)))
-        .child(div().flex_1().min_w_0().truncate().text_lg().child(name))
+        .child(div().flex_1().min_w_0().truncate().child(name))
         .child(
           Button::new(("reveal", i))
             .icon(Icon::new(Lucide::FolderOpen))
             .ghost()
-            .small()
             .tooltip("Open containing folder")
+            .xsmall()
             .on_click(move |_: &ClickEvent, _, cx| {
               cx.stop_propagation();
               crate::platform::reveal_in_file_manager(&reveal);
@@ -1451,8 +1453,8 @@ impl PresenterApp {
           Button::new(("remove", i))
             .icon(Icon::new(Lucide::X))
             .ghost()
-            .small()
             .tooltip("Remove from recent")
+            .xsmall()
             .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
               cx.stop_propagation();
               app.remove_recent(&remove);
@@ -1461,15 +1463,15 @@ impl PresenterApp {
         )
     });
     top
-      .child(div().w_full().h(px(1.0)).mt_4().bg(border))
-      .child(div().pt_2().text_xl().font_weight(FontWeight::BOLD).child("Recent files"))
+      .child(div().w_full().h(px(1.0)).mt_2().bg(border))
+      .child(div().pt_1().text_sm().font_weight(FontWeight::BOLD).child("Recent files"))
       .child(
         div()
           .id("recent-list")
           .flex_1()
           .min_h_0()
           .w_full()
-          .max_w(px(680.0))
+          .max_w(px(520.0))
           .overflow_y_scroll()
           .child(v_flex().children(rows)),
       )
