@@ -13,20 +13,7 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Bug Fixes
 
 - *(config)* Write state atomically and keep an unreadable state file ([efc89f6](https://github.com/tschinz/bella-presenter/commit/efc89f6890dd450ec69a1fc6ede6756a125d60b9) - zas)
-- Clear drawings, zoom and pictures of the previous file when opening another one ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Store absolute paths, so hot reload and recent files work for a relative command-line path ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- End a press released outside the window, so the pointer or stroke no longer sticks ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Keep the camera live while a fullscreen audience covers the presenter on one screen ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Keep the camera image at full size when removing the background, so it no longer rescales ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Show an error when a file cannot be opened or reloaded ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Ignore W while presenting and S while a screen swap is under way ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-
-### ⚡ Performance
-
-- Render only the needed half of a notes page, in GPUI's pixel order (about twice as fast for notes decks) ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Bound the slide cache by memory, render in size steps and prepare the next slide ahead ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Redraw only the audience window for camera frames and the footer once per second ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
-- Turn one slide per trackpad swipe ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- *(ci)* Linux wayland install packages ([462f4d1](https://github.com/tschinz/bella-presenter/commit/462f4d106ae4c4f99dd7f71122260bec03f58e7b) - zas)
 
 ### 📚 Documentation
 
@@ -34,7 +21,7 @@ All notable changes to this project will be documented in this file.
 - *(readme)* Describe links, go to slide and timer pause ([4576c37](https://github.com/tschinz/bella-presenter/commit/4576c379721f322d72fb50e2689b8199ec1454e6) - zas)
 
 
-**Full Changelog**: [v0.4.0...v0.5.0](https://github.com/tschinz/bella-presenter/compare/v0.4.0...v0.5.0)
+**Full Changelog**: [v0.4.0...0.5.0](https://github.com/tschinz/bella-presenter/compare/v0.4.0...0.5.0)
 
 ## [0.4.0] - 2026-11-05
 
