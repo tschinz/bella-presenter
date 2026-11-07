@@ -7,7 +7,7 @@
 
 **A fast, native dual-screen PDF presenter for Typst & LaTeX slides.**
 
-Runs on macOS · Windows · Linux · Built with [egui](https://github.com/emilk/egui) + [PDFium](https://pdfium.googlesource.com/pdfium/)
+Runs on macOS · Windows · Linux · Built with [GPUI](https://gpui-kit.com) + [PDFium](https://pdfium.googlesource.com/pdfium/)
 
 [![GitHub Repo stars](https://img.shields.io/github/stars/tschinz/bella-presenter?logo=github)](https://github.com/tschinz/bella-presenter/stargazers) [![GitHub Release](https://img.shields.io/github/v/release/tschinz/bella-presenter?logo=github)](https://github.com/tschinz/bella-presenter/releases/latest) [![Sponsor tschinz](https://img.shields.io/badge/Sponsor-%E2%9D%A4-ea4aaa?logo=githubsponsors&logoColor=white)](https://github.com/sponsors/tschinz)
 
@@ -79,7 +79,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 - **Thumbnail strip.** A scrollable, resizable filmstrip of every slide; click to jump, and it follows the current slide. Toggle with `T`.
 - **Adaptive, resizable layout.** Cycle 4 current/next/notes arrangements (or a H/V current+next split without notes) with `L`; drag any divider to resize. Sizes are remembered.
 - **Laser pointer & drawing, mirrored.** Hold the mouse on the current slide for a pointer dot, or press `P` to draw freehand — shown live on the audience screen. Pick the colour from a swatch in the header.
-- **Zoom & pan.** `Ctrl`/`⌘` + scroll zooms at the cursor, `Ctrl` + drag pans — on either window, mirrored to the room. Zooming grows the slide into the letterbox bars, so a portrait page fills the window width.
+- **Zoom & pan.** `⌥`/`⌘`/`Ctrl` + scroll zooms at the cursor, the same keys + drag pan — on either window, mirrored to the room. Zooming grows the slide into the letterbox bars, so a portrait page fills the window width.
 - **Webcam overlay.** Show your camera in a configurable corner of the audience window only (`C`). Choose a rectangle, rounded rectangle or circle, and set the size, source and mirroring from the ⚙ popover, which also shows a live preview and capture resolution. The camera runs only while presenting or while the settings popover is open.
 - **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
 - **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; cycle system/dark/light theme from the header.
@@ -107,7 +107,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | `C` | Toggle the webcam overlay (settings in the ⚙ popover) |
 | `P` / `D` | Toggle laser pointer / drawing · delete all drawings |
 | Hold mouse on current slide (either window) | Laser pointer / draw (shown on the audience screen) |
-| `Ctrl` (or `⌘`) + scroll / drag (either window) | Zoom at the cursor / pan the zoomed slide |
+| `Ctrl`, `Alt`/`⌥` or `⌘` + scroll / drag (either window) | Zoom at the cursor / pan the zoomed slide |
 | Double-click (audience) | Toggle fullscreen |
 | Drag & drop a PDF | Open it |
 
