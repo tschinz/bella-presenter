@@ -82,7 +82,9 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 - **Zoom & pan.** `⌥`/`⌘`/`Ctrl` + scroll zooms at the cursor, the same keys + drag pan — on either window, mirrored to the room. Zooming grows the slide into the letterbox bars, so a portrait page fills the window width.
 - **Webcam overlay.** Show your camera in a configurable corner of the audience window only (`C`). Choose a rectangle, rounded rectangle or circle, and set the size, source and mirroring from the ⚙ popover, which also shows a live preview and capture resolution. The camera runs only while presenting or while the settings popover is open.
 - **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
-- **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; cycle system/dark/light theme from the header.
+- **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; pause and resume it with `K` or a click on it. Cycle system/dark/light theme from the header.
+- **Go to a slide.** Type its number and press `Enter`; the footer shows what you typed.
+- **Clickable links.** Links in the PDF work on either window: a click on a link to another slide jumps there, web and mail links open in the browser or mail app. The cursor turns into a hand over a link.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
 - **Open with.** Installed builds appear in the OS "Open with" menu for PDFs (macOS, Linux `.deb`, Windows via `install.ps1`); the file opens directly, also into a running instance.
 - **Updates.** At start the app checks the latest GitHub release and offers to install it and restart (macOS replaces the `.app`, Linux installs the `.deb` via `pkexec`, Windows replaces the portable files). Never shown while presenting.
@@ -99,6 +101,8 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | `B` | Blank the audience screen (black) |
 | `W` | Close the file, back to the start screen |
 | `R` | Reset the talk timer |
+| `K` / click the timer | Pause / resume the talk timer |
+| Number + `Enter` | Go to that slide (`Esc` cancels) |
 | `L` | Flip layout |
 | `T` | Toggle the thumbnail strip |
 | `S` | Swap presenter / presentation screens |
@@ -107,6 +111,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | `C` | Toggle the webcam overlay (settings in the ⚙ popover) |
 | `P` / `D` | Toggle laser pointer / drawing · delete all drawings |
 | Hold mouse on current slide (either window) | Laser pointer / draw (shown on the audience screen) |
+| Click a link (pointer mode) | Follow it: jump to the slide, or open a web or mail link |
 | `Ctrl`, `Alt`/`⌥` or `⌘` + scroll / drag (either window) | Zoom at the cursor / pan the zoomed slide |
 | Double-click (audience) | Toggle fullscreen |
 | Drag & drop a PDF | Open it |
