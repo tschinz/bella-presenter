@@ -82,7 +82,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 - **Zoom & pan.** `⌥`/`⌘`/`Ctrl` + scroll zooms at the cursor, the same keys + drag pan — on either window, mirrored to the room. Zooming grows the slide into the letterbox bars, so a portrait page fills the window width.
 - **Webcam overlay.** Show your camera in a configurable corner of the audience window only (`C`). Choose a rectangle, rounded rectangle or circle, and set the size, source and mirroring from the ⚙ popover, which also shows a live preview and capture resolution. The camera runs only while presenting or while the settings popover is open.
 - **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
-- **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; pause and resume it with `K` or a click on it. Cycle system/dark/light theme from the header.
+- **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; pause, resume and reset it with `K` / `R` or the buttons next to it. Cycle system/dark/light theme from the header.
 - **Go to a slide.** Type its number and press `Enter`; the footer shows what you typed.
 - **Clickable links.** Links in the PDF work on either window: a click on a link to another slide jumps there, web and mail links open in the browser or mail app. The cursor turns into a hand over a link.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
@@ -101,7 +101,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | `B` | Blank the audience screen (black) |
 | `W` | Close the file, back to the start screen |
 | `R` | Reset the talk timer |
-| `K` / click the timer | Pause / resume the talk timer |
+| `K` | Pause / resume the talk timer (also a button in the footer) |
 | Number + `Enter` | Go to that slide (`Esc` cancels) |
 | `L` | Flip layout |
 | `T` | Toggle the thumbnail strip |

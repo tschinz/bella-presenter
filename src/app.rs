@@ -29,10 +29,10 @@ use gpui_kit::component::resizable::{ResizableState, h_resizable, resizable_pane
 use gpui_kit::component::slider::SliderEvent;
 use gpui_kit::component::spinner::Spinner;
 use gpui_kit::component::tooltip::Tooltip;
-use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, VirtualListScrollHandle, h_flex, h_virtual_list, v_flex};
+use gpui_kit::component::{ActiveTheme, Disableable, Icon, Selectable, Sizable, VirtualListScrollHandle, h_flex, h_virtual_list, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  AnyElement, AnyWindowHandle, App, AppContext, Bounds, ClickEvent, ContentMask, Context, Corners, CursorStyle, DispatchPhase, Entity, ExternalPaths,
+  Anchor, AnyElement, AnyWindowHandle, App, AppContext, Bounds, ClickEvent, ContentMask, Context, Corners, CursorStyle, DispatchPhase, Entity, ExternalPaths,
   FontWeight, Hitbox, HitboxBehavior, Hsla, Image, ImageFormat, InteractiveElement, IntoElement, KeystrokeEvent, Modifiers, MouseButton, MouseDownEvent,
   MouseMoveEvent, MouseUpEvent, ParentElement, PathBuilder, Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollStrategy, ScrollWheelEvent,
   SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions, TouchPhase, Window, WindowBounds, WindowOptions, canvas, div,
@@ -1067,13 +1067,13 @@ impl PresenterApp {
   fn header(&mut self, cx: &mut Context<Self>) -> AnyElement {
     let c = Colors::current(cx);
     let separator = || div().w(px(1.0)).h(px(16.0)).mx_1().bg(c.border);
-    let button = |id: &'static str, icon: Option<Lucide>, label: &str, tooltip: &'static str, action: fn(&mut Self, &mut Context<Self>)| {
+    // Icons only: the tooltip names the action and its key.
+    let button = |id: &'static str, icon: Lucide, tooltip: &'static str, action: fn(&mut Self, &mut Context<Self>)| {
       Button::new(id)
-        .when_some(icon, |b, icon| b.icon(Icon::new(icon)))
-        .when(!label.is_empty(), |b| b.label(label.to_owned()))
+        .icon(Icon::new(icon))
         .ghost()
         .xsmall()
-        .when(!tooltip.is_empty(), |b| b.tooltip(tooltip))
+        .tooltip(tooltip)
         .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
           action(app, cx);
           cx.notify();
@@ -1082,85 +1082,51 @@ impl PresenterApp {
 
     let mut left = h_flex().flex_1().flex_wrap().gap_1().items_center();
     // ── General ──
-    left = left.child(button("open", Some(Lucide::FolderOpen), "Open (O)", "", |app, cx| app.pick_file(cx)));
+    left = left.child(button("open", Lucide::FolderOpen, "Open a PDF (O)", |app, cx| app.pick_file(cx)));
     if self.document.is_some() {
       left = left
-        .child(button("close", Some(Lucide::X), "Close (W)", "", |app, cx| app.close_file(cx)))
+        .child(button("close", Lucide::X, "Close the file (W)", |app, cx| app.close_file(cx)))
         .child(if self.presenting {
-          button("quit", Some(Lucide::CircleStop), "Quit (Esc)", "", |app, cx| app.stop_presentation(cx))
+          button("quit", Lucide::CircleStop, "Quit the presentation (Esc)", |app, cx| app.stop_presentation(cx))
         } else {
-          button("present", Some(Lucide::Play), "Present (F5)", "", |app, cx| app.start_presentation(cx))
+          button("present", Lucide::Play, "Start the presentation (F5)", |app, cx| app.start_presentation(cx))
         })
-        .child(button(
-          "blank",
-          Some(Lucide::Square),
-          if self.blanked { "Blanked (B)" } else { "Blank (B)" },
-          "",
-          |app, _| app.blanked = !app.blanked,
-        ))
-        .child(if self.session.timer().is_running() {
-          button("timer-toggle", Some(Lucide::Pause), "Pause (K)", "Pause the timer", |app, _| {
-            app.session.timer_mut().toggle()
-          })
-        } else {
-          button("timer-toggle", Some(Lucide::Play), "Resume (K)", "Start or resume the timer", |app, _| {
-            app.session.timer_mut().toggle()
-          })
-        })
-        .child(button("reset", Some(Lucide::RotateCcw), "Reset time (R)", "", |app, _| {
-          app.session.timer_mut().reset()
-        }))
+        .child(
+          button(
+            "blank",
+            Lucide::Square,
+            if self.blanked {
+              "Show the slide again (B)"
+            } else {
+              "Blank the audience screen (B)"
+            },
+            |app, _| app.blanked = !app.blanked,
+          )
+          .selected(self.blanked),
+        )
         .child(button(
           "swap",
-          Some(Lucide::ArrowLeftRight),
-          "Swap (S)",
-          "Swap presenter / presentation screens",
+          Lucide::ArrowLeftRight,
+          "Swap the presenter and audience screens (S)",
           |app, cx| app.swap_screens(cx),
         ))
-        // ── Settings popover: footer size, pointer size, hot reload, camera ──
-        .child(separator())
-        .child({
-          let app = cx.entity();
-          Popover::new("settings")
-            .trigger(
-              Button::new("settings-button")
-                .icon(Icon::new(Lucide::Settings))
-                .ghost()
-                .xsmall()
-                .tooltip("Footer & pointer size"),
-            )
-            .content(move |_, _, cx| app.update(cx, |app, cx| app.settings_panel(cx)))
-        })
         // ── Display ──
-        .child(button(
-          "layout",
-          Some(Lucide::LayoutDashboard),
-          "Layout (L)",
-          "Cycle panel arrangements",
-          |app, _| app.flip_layout(),
-        ))
-        .child(button(
-          "thumbs",
-          Some(Lucide::PanelBottom),
-          "Thumbnails (T)",
-          "Toggle the slide thumbnail strip",
-          |app, _| app.toggle_thumbnails(),
-        ))
+        .child(separator())
+        .child(button("layout", Lucide::LayoutDashboard, "Cycle the panel layout (L)", |app, _| {
+          app.flip_layout()
+        }))
+        .child(
+          button("thumbs", Lucide::PanelBottom, "Show / hide the thumbnail strip (T)", |app, _| {
+            app.toggle_thumbnails()
+          })
+          .selected(self.show_thumbnails),
+        )
         // ── Drawing: toggle always; colour + delete appear only while in draw mode ──
         .child(separator())
-        .child(button(
-          "mode",
-          Some(match self.mode {
-            InputMode::Pointer => Lucide::Pencil,
-            InputMode::Draw => Lucide::MousePointer,
-          }),
-          match self.mode {
-            InputMode::Pointer => "Draw (P)",
-            InputMode::Draw => "Pointer (P)",
-          },
-          "Toggle laser pointer / drawing",
-          |app, _| app.toggle_mode(),
-        ));
+        .child(match self.mode {
+          InputMode::Pointer => button("mode", Lucide::Pencil, "Draw on the slide (P)", |app, _| app.toggle_mode()),
+          InputMode::Draw => button("mode", Lucide::MousePointer, "Back to the laser pointer (P)", |app, _| app.toggle_mode()),
+        });
       if self.mode == InputMode::Draw {
         left = left
           .child(
@@ -1169,9 +1135,7 @@ impl PresenterApp {
               .tooltip(|window, cx| Tooltip::new("Pointer & drawing colour").build(window, cx))
               .child(ColorPicker::new(&self.color_picker).xsmall()),
           )
-          .child(button("clear", Some(Lucide::Eraser), "Delete (D)", "Clear all drawings", |app, _| {
-            app.clear_drawings()
-          }));
+          .child(button("clear", Lucide::Eraser, "Delete all drawings (D)", |app, _| app.clear_drawings()));
       }
     }
 
@@ -1181,9 +1145,25 @@ impl PresenterApp {
       config::Theme::Dark => (Lucide::Moon, "Theme: dark (click to cycle)"),
       config::Theme::Light => (Lucide::Sun, "Theme: light (click to cycle)"),
     };
+    // Settings popover (footer size, pointer size, hot reload, camera): first of the right-hand
+    // icons, opening leftwards so it stays on screen.
+    let settings = {
+      let app = cx.entity();
+      Popover::new("settings")
+        .anchor(Anchor::TopRight)
+        .trigger(
+          Button::new("settings-button")
+            .icon(Icon::new(Lucide::Settings))
+            .ghost()
+            .xsmall()
+            .tooltip("Settings: footer, pointer, hot reload, camera"),
+        )
+        .content(move |_, _, cx| app.update(cx, |app, cx| app.settings_panel(cx)))
+    };
     let right = h_flex()
       .flex_none()
       .gap_1()
+      .child(settings)
       .child(
         Button::new("theme")
           .icon(Icon::new(theme_icon))
@@ -1201,10 +1181,10 @@ impl PresenterApp {
             cx.notify();
           })),
       )
-      .child(button("shortcuts", Some(Lucide::Keyboard), "", "Show keyboard & mouse shortcuts", |app, _| {
+      .child(button("shortcuts", Lucide::Keyboard, "Keyboard & mouse shortcuts", |app, _| {
         app.show_shortcuts = !app.show_shortcuts
       }))
-      .child(button("about", Some(Lucide::Info), "", "About this application", |app, _| {
+      .child(button("about", Lucide::Info, "About bella-presenter", |app, _| {
         app.show_about = !app.show_about
       }));
 
@@ -1276,11 +1256,34 @@ impl PresenterApp {
     };
     let clock = chrono::Local::now().format("%H:%M:%S").to_string();
     let t = self.session.timer();
-    let elapsed = format!("{}{}", format_elapsed(t.elapsed()), if t.is_running() { "" } else { "  (paused)" });
+    // Whether it runs shows in the play/pause button next to it.
+    let elapsed = format_elapsed(t.elapsed());
     let fs = px(self.footer_font);
     let icon = |name| Icon::new(name).size(fs * 0.85);
     let dot = || div().px(fs).child("·");
     let c = Colors::current(cx);
+    // A timer control: an icon at footer size, highlighted under the mouse.
+    let control = |id: &'static str, name, tooltip: &'static str, action: fn(&mut Self)| {
+      div()
+        .id(id)
+        .p(fs * 0.15)
+        .rounded(px(4.0))
+        .cursor_pointer()
+        .hover(|s| s.bg(c.row_alt))
+        .tooltip(move |window, cx| Tooltip::new(tooltip).build(window, cx))
+        .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+          action(app);
+          cx.notify();
+        }))
+        .child(icon(name))
+    };
+    let toggle = if t.is_running() {
+      control("timer-toggle", Lucide::Pause, "Pause the timer (K)", |app| app.session.timer_mut().toggle())
+    } else {
+      control("timer-toggle", Lucide::Play, "Start / resume the timer (K)", |app| {
+        app.session.timer_mut().toggle()
+      })
+    };
     h_flex()
       .w_full()
       .justify_center()
@@ -1296,19 +1299,12 @@ impl PresenterApp {
       .child(icon(Lucide::Clock))
       .child(clock)
       .child(dot())
-      .child(
-        h_flex()
-          .id("timer")
-          .gap_2()
-          .cursor_pointer()
-          .tooltip(|window, cx| Tooltip::new("Pause / resume the timer (K)").build(window, cx))
-          .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
-            app.session.timer_mut().toggle();
-            cx.notify();
-          }))
-          .child(icon(Lucide::Timer))
-          .child(elapsed),
-      )
+      .child(icon(Lucide::Timer))
+      .child(elapsed)
+      .child(toggle)
+      .child(control("timer-reset", Lucide::RotateCcw, "Reset the timer (R)", |app| {
+        app.session.timer_mut().reset()
+      }))
       .into_any_element()
   }
 
@@ -1891,7 +1887,7 @@ impl PresenterApp {
       ("C", "Toggle the webcam overlay"),
       ("W", "Close file, back to start screen"),
       ("R", "Reset the talk timer"),
-      ("K / click the timer", "Pause / resume the talk timer"),
+      ("K", "Pause / resume the talk timer (also in the footer)"),
       ("Number + Enter", "Go to that slide"),
       ("Click a link", "Follow it (pointer mode)"),
       ("L", "Flip layout (H/V with no notes; 4 presets with notes)"),
