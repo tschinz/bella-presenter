@@ -2,6 +2,40 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - 2026-11-07
+
+### 🚀 Features
+
+- *(ui)* Port the interface from egui to gpui ([9aa8039](https://github.com/tschinz/bella-presenter/commit/9aa80392cd08a22bf5fdbe00c33a1cf8a4640e23) - zas)
+- *(camera)* Place the overlay top right by default ([96d825d](https://github.com/tschinz/bella-presenter/commit/96d825ded3244aba32cc33277f8dcd3a0335fae6) - zas)
+- *(presenter)* Follow pdf links, go to a slide and pause the timer ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+
+### 🐛 Bug Fixes
+
+- *(config)* Write state atomically and keep an unreadable state file ([efc89f6](https://github.com/tschinz/bella-presenter/commit/efc89f6890dd450ec69a1fc6ede6756a125d60b9) - zas)
+- Clear drawings, zoom and pictures of the previous file when opening another one ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Store absolute paths, so hot reload and recent files work for a relative command-line path ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- End a press released outside the window, so the pointer or stroke no longer sticks ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Keep the camera live while a fullscreen audience covers the presenter on one screen ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Keep the camera image at full size when removing the background, so it no longer rescales ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Show an error when a file cannot be opened or reloaded ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Ignore W while presenting and S while a screen swap is under way ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+
+### ⚡ Performance
+
+- Render only the needed half of a notes page, in GPUI's pixel order (about twice as fast for notes decks) ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Bound the slide cache by memory, render in size steps and prepare the next slide ahead ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Redraw only the audience window for camera frames and the footer once per second ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+- Turn one slide per trackpad swipe ([ffdc01d](https://github.com/tschinz/bella-presenter/commit/ffdc01dd677f9f621698afef7298a05431de7601) - zas)
+
+### 📚 Documentation
+
+- *(readme)* Name gpui and the option key for zoom and pan ([bd50453](https://github.com/tschinz/bella-presenter/commit/bd50453b50e2a56c91ca8aabd5815b8faf61474f) - zas)
+- *(readme)* Describe links, go to slide and timer pause ([4576c37](https://github.com/tschinz/bella-presenter/commit/4576c379721f322d72fb50e2689b8199ec1454e6) - zas)
+
+
+**Full Changelog**: [v0.4.0...v0.5.0](https://github.com/tschinz/bella-presenter/compare/v0.4.0...v0.5.0)
+
 ## [0.4.0] - 2026-11-05
 
 ### 🚀 Features
