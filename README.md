@@ -38,9 +38,13 @@ It stays instant even on large decks (300+ pages) thanks to lazy rendering, a te
 
 ![Freehand annotations drawn on the current slide](img/screenshot-drawing.png)
 
-**Audience webcam overlay** - show the presenter in a configurable corner of the projected slide.
+**Audience webcam overlay** - show the presenter in a configurable corner of the projected slide, here with the background removed and a freehand drawing on the slide.
 
-![Audience view with the webcam in a circular overlay and removed background](img/screenshot-audience-view.png)
+![Audience view with the webcam overlay, its background removed, and a heart drawn on the slide](img/screenshot-audience-view.png)
+
+The overlay can also be a circle, keeping the camera's background.
+
+![Audience view with the webcam in a circular overlay](img/screenshot-audience-view-circle.png)
 
 **Camera settings** - choose the camera, position, size and shape; set the background to normal, blurred or removed.
 
