@@ -120,7 +120,11 @@ gpui_kit::assets::icon_assets!(
     Laptop,
     Keyboard,
     Clock,
-    Timer
+    Timer,
+    ArrowUpLeft,
+    ArrowUpRight,
+    ArrowDownLeft,
+    ArrowDownRight
   ]
 );
 

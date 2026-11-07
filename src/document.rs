@@ -7,7 +7,7 @@ use anyhow::Result;
 use image::RgbaImage;
 
 use crate::render::pdfium::PdfiumRenderer;
-use crate::render::{PageRenderer, PageSize};
+use crate::render::{Link, PageRenderer, PageSize, Region};
 
 /// Where the speaker notes live relative to the slide on each page.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,24 +24,6 @@ pub enum NotesSide {
   Left,
   Top,
   Bottom,
-}
-
-/// Normalized sub-rectangle of a page (0..1 in both axes).
-#[derive(Clone, Copy, Debug)]
-pub struct Region {
-  pub x: f32,
-  pub y: f32,
-  pub w: f32,
-  pub h: f32,
-}
-
-impl Region {
-  pub const FULL: Region = Region {
-    x: 0.0,
-    y: 0.0,
-    w: 1.0,
-    h: 1.0,
-  };
 }
 
 pub struct Document {
@@ -116,9 +98,29 @@ impl Document {
     self.notes_region(page).map(|r| region_aspect(self.page_size(page).aspect(), r))
   }
 
-  /// Render a full page at the given pixel size.
+  /// Render a full page at the given pixel size (BGRA, see [`PageRenderer::render`]).
   pub fn render_page(&self, page: usize, target_px: [u32; 2]) -> Result<RgbaImage> {
-    self.renderer.render(page, target_px)
+    self.renderer.render(page, Region::FULL, target_px)
+  }
+
+  /// The links on the slide part of `page`, with their areas relative to the slide.
+  pub fn slide_links(&self, page: usize) -> Vec<Link> {
+    let slide = self.slide_region(page);
+    self
+      .renderer
+      .links(page)
+      .into_iter()
+      .filter(|link| slide.contains(link.area.x + link.area.w / 2.0, link.area.y + link.area.h / 2.0))
+      .map(|link| Link {
+        area: Region {
+          x: (link.area.x - slide.x) / slide.w,
+          y: (link.area.y - slide.y) / slide.h,
+          w: link.area.w / slide.w,
+          h: link.area.h / slide.h,
+        },
+        ..link
+      })
+      .collect()
   }
 
   /// Render just the slide portion of a page (the audience view).
@@ -134,27 +136,9 @@ impl Document {
     }
   }
 
-  /// Render an arbitrary normalized sub-rectangle of a page at `target_px`.
-  ///
-  /// The whole page is rasterized at a resolution that makes `region` land on
-  /// `target_px`, then cropped — so the returned image is at full slide resolution,
-  /// not an upscale of a small render.
+  /// Render a normalized sub-rectangle of a page at `target_px`, at full resolution.
   fn render_region(&self, page: usize, region: Region, target_px: [u32; 2]) -> Result<RgbaImage> {
-    // Fast path: the whole page.
-    if region.x <= f32::EPSILON && region.y <= f32::EPSILON && region.w >= 1.0 - f32::EPSILON && region.h >= 1.0 - f32::EPSILON {
-      return self.renderer.render(page, target_px);
-    }
-
-    let [tw, th] = [target_px[0].max(1), target_px[1].max(1)];
-    let full_w = (tw as f32 / region.w).round().max(1.0) as u32;
-    let full_h = (th as f32 / region.h).round().max(1.0) as u32;
-    let full = self.renderer.render(page, [full_w, full_h])?;
-
-    let x = (region.x * full.width() as f32).round() as u32;
-    let y = (region.y * full.height() as f32).round() as u32;
-    let w = tw.min(full.width().saturating_sub(x)).max(1);
-    let h = th.min(full.height().saturating_sub(y)).max(1);
-    Ok(image::imageops::crop_imm(&full, x, y, w, h).to_image())
+    self.renderer.render(page, region, target_px)
   }
 }
 

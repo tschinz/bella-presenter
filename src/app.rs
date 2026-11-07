@@ -32,11 +32,11 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::component::{ActiveTheme, Disableable, Icon, Sizable, VirtualListScrollHandle, h_flex, h_virtual_list, v_flex};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::{
-  AnyElement, AnyWindowHandle, App, AppContext, Bounds, ClickEvent, ContentMask, Context, Corners, DispatchPhase, Entity, ExternalPaths, FontWeight, Hitbox,
-  HitboxBehavior, Hsla, Image, ImageFormat, InteractiveElement, IntoElement, KeystrokeEvent, Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent,
-  MouseUpEvent, ParentElement, PathBuilder, Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollStrategy, ScrollWheelEvent, SharedString, Size,
-  StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions, Window, WindowBounds, WindowOptions, canvas, div, img, point, px, rgb, size,
-  uniform_list,
+  AnyElement, AnyWindowHandle, App, AppContext, Bounds, ClickEvent, ContentMask, Context, Corners, CursorStyle, DispatchPhase, Entity, ExternalPaths,
+  FontWeight, Hitbox, HitboxBehavior, Hsla, Image, ImageFormat, InteractiveElement, IntoElement, KeystrokeEvent, Modifiers, MouseButton, MouseDownEvent,
+  MouseMoveEvent, MouseUpEvent, ParentElement, PathBuilder, Pixels, Point, Render, RenderImage, Rgba, ScrollDelta, ScrollStrategy, ScrollWheelEvent,
+  SharedString, Size, StatefulInteractiveElement, Styled, Subscription, Task, TitlebarOptions, TouchPhase, Window, WindowBounds, WindowOptions, canvas, div,
+  img, point, px, rgb, size, uniform_list,
 };
 use notify::Watcher as _;
 
@@ -44,6 +44,7 @@ use crate::Waker;
 use crate::camera::controller::CameraController;
 use crate::config::{self, Geometry};
 use crate::document::Document;
+use crate::render::{self, LinkTarget};
 use crate::screen;
 use crate::session::{Session, format_elapsed};
 use crate::style::Colors;
@@ -123,6 +124,9 @@ pub struct PresenterApp {
   /// The slide the strip last auto-scrolled to follow (so it only re-centres on change).
   thumb_follow_last: usize,
   thumb_scroll: VirtualListScrollHandle,
+  /// Pictures to render ahead while idle (page, region, pixel size), and the task doing it.
+  prefetch: Vec<(usize, Region, [u32; 2])>,
+  prefetch_task: Option<Task<()>>,
   /// Last window title pushed to the OS (so it is only set on change).
   title: String,
   footer_font: f32,
@@ -155,6 +159,8 @@ pub struct PresenterApp {
   show_release_notes: bool,
   /// The outcome of an update check started from the About card (up to date, or why it failed).
   update_note: Option<String>,
+  /// A file that failed to open or reload, shown until dismissed.
+  error: Option<String>,
   /// The update check at start and the offer it leads to.
   update: UpdateStep,
   /// A release version the user chose to skip (persisted).
@@ -170,10 +176,20 @@ pub struct PresenterApp {
   drawing: bool,
   /// The slide surface the left mouse button was pressed on, while it is held.
   pressed: Option<Surface>,
+  /// Each page's slide links (looked up once), the surface with a link under the mouse, and where
+  /// and when the current press began (a short press that stays put is a click).
+  links: HashMap<usize, Rc<Vec<render::Link>>>,
+  link_hover: Option<Surface>,
+  press_start: Option<(Point<f32>, Instant)>,
   /// The previous mouse position of a held press (for Ctrl+drag panning).
   drag_last: Option<Point<f32>>,
+  /// The slide number typed so far (go to it with Enter).
+  goto_input: String,
   /// Accumulated mouse-wheel delta, for scroll-to-navigate.
   scroll_accum: f32,
+  /// Whether the current trackpad swipe already turned a slide, and when the last scroll came.
+  swipe_turned: bool,
+  last_scroll: Instant,
   /// Zoom factor of the current slide (1.0 = fit); centre of the visible window (slide coords).
   zoom: f32,
   zoom_center: Point<f32>,
@@ -220,7 +236,8 @@ impl PresenterApp {
     };
     let options = window_options(APP_NAME, WindowBounds::Windowed(bounds), primary.map(|d| d.id()));
     let (waker, mut wakes) = Waker::new();
-    let opened_window = gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| Self::new(st, waker, window, cx)));
+    let (frames, mut frame_wakes) = Waker::new();
+    let opened_window = gpui_kit::open_window(options, cx, |window, cx| cx.new(|cx| Self::new(st, waker, frames, window, cx)));
     let (handle, app) = match opened_window {
       Ok(opened) => opened,
       Err(e) => {
@@ -244,6 +261,15 @@ impl PresenterApp {
       }
     })
     .detach();
+    let weak = app.downgrade();
+    cx.spawn(async move |cx| {
+      while frame_wakes.next().await.is_some() {
+        if weak.update(cx, |app, cx| app.camera_frame(cx)).is_err() {
+          break;
+        }
+      }
+    })
+    .detach();
     let opener = app.clone();
     cx.spawn(async move |cx| {
       while let Some(path) = opened.next().await {
@@ -260,7 +286,7 @@ impl PresenterApp {
     .detach();
   }
 
-  fn new(st: config::State, waker: Waker, window: &mut Window, cx: &mut Context<Self>) -> Self {
+  fn new(st: config::State, waker: Waker, frames: Waker, window: &mut Window, cx: &mut Context<Self>) -> Self {
     // Prune recent entries whose file no longer exists on disk (moved/deleted).
     let mut recent = st.recent;
     let had = recent.len();
@@ -268,7 +294,7 @@ impl PresenterApp {
     let pruned = recent.len() != had;
 
     let color_picker = cx.new(|cx| ColorPickerState::new(window, cx).default_value(color(st.pointer_color, 255)));
-    let camera = CameraController::new(st.camera, waker.clone(), cx);
+    let camera = CameraController::new(st.camera, waker.clone(), frames, cx);
     let this = cx.entity().downgrade();
     let subscriptions = vec![
       // Shortcuts work in every window: also over a fullscreen audience window on a single screen.
@@ -298,12 +324,14 @@ impl PresenterApp {
     let mut app = Self {
       document: None,
       session: Session::new(0),
-      cache: TextureCache::new(48),
-      thumb_cache: TextureCache::new(128),
+      cache: TextureCache::new(512 << 20),
+      thumb_cache: TextureCache::new(64 << 20),
       show_thumbnails: st.show_thumbnails,
       thumb_height: st.thumb_height.clamp(MIN_STRIP_H, MAX_STRIP_H),
       thumb_follow_last: usize::MAX,
       thumb_scroll: VirtualListScrollHandle::new(),
+      prefetch: Vec::new(),
+      prefetch_task: None,
       title: String::new(),
       footer_font: st.footer_font,
       pointer_size: st.pointer_size.clamp(MIN_POINTER_SIZE, MAX_POINTER_SIZE),
@@ -325,6 +353,7 @@ impl PresenterApp {
       show_thirdparty: false,
       show_release_notes: false,
       update_note: None,
+      error: None,
       update: UpdateStep::Checking(in_background(&waker, update::check), false),
       skipped_update: st.skipped_update,
       mode: InputMode::Pointer,
@@ -333,7 +362,13 @@ impl PresenterApp {
       drawing: false,
       pressed: None,
       drag_last: None,
+      links: HashMap::new(),
+      link_hover: None,
+      press_start: None,
+      goto_input: String::new(),
       scroll_accum: 0.0,
+      swipe_turned: false,
+      last_scroll: Instant::now(),
       zoom: 1.0,
       zoom_center: SLIDE_CENTER,
       zoom_page: 0,
@@ -380,6 +415,8 @@ impl PresenterApp {
   }
 
   fn open(&mut self, path: &Path, cx: &mut Context<Self>) {
+    // Absolute, so the watcher has a folder and the recent entry works from any working directory.
+    let path = &std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     match Document::open(path) {
       Ok(doc) => {
         self.session = Session::new(doc.page_count());
@@ -387,16 +424,36 @@ impl PresenterApp {
           self.session.goto(page as isize);
         }
         self.document = Some(doc);
-        self.cache.clear();
-        self.thumb_cache.clear();
+        self.blanked = false;
+        self.reset_view();
         self.reload_due = None;
+        self.error = None;
         self.update_watcher(); // point the file watcher at the new file
         self.record_recent(path);
         self.save_now(); // persist the new recent entry immediately
       }
-      Err(e) => tracing::error!("failed to open {}: {e:#}", path.display()),
+      Err(e) => {
+        tracing::error!("failed to open {}: {e:#}", path.display());
+        self.error = Some(format!("Cannot open {}:\n{e:#}", path.display()));
+      }
     }
     cx.notify();
+  }
+
+  /// Forget what belongs to the previous document or version: pictures, drawings, pointer and zoom.
+  fn reset_view(&mut self) {
+    self.prefetch.clear();
+    self.links.clear();
+    self.link_hover = None;
+    self.cache.clear();
+    self.thumb_cache.clear();
+    self.thumb_follow_last = usize::MAX;
+    self.strokes.clear();
+    self.drawing = false;
+    self.pressed = None;
+    self.pointer_norm = None;
+    self.reset_zoom();
+    self.zoom_page = self.session.current();
   }
 
   fn recent_page(&self, path: &Path) -> Option<usize> {
@@ -550,7 +607,7 @@ impl PresenterApp {
   /// Open the audience window fullscreen: on the second screen if present, otherwise on the
   /// current (primary) screen, covering the presenter. Shortcuts keep working over it.
   fn start_presentation(&mut self, cx: &mut Context<Self>) {
-    if self.document.is_none() || self.audience.is_some() {
+    if self.document.is_none() || self.presenting || self.audience.is_some() {
       return;
     }
     self.presenting = true;
@@ -565,8 +622,15 @@ impl PresenterApp {
     cx.defer(move |cx| {
       let opened = gpui_kit::open_window(options, cx, |window, cx| {
         let closing = app.clone();
-        window.on_window_should_close(cx, move |_, cx| {
-          closing.update(cx, |app, cx| app.stop_presentation(cx));
+        window.on_window_should_close(cx, move |window, cx| {
+          let id = window.window_handle().window_id();
+          closing.update(cx, |app, cx| {
+            // The OS closes this window itself: only end the presentation it belongs to.
+            if app.audience.is_some_and(|a| a.window_id() == id) {
+              app.audience = None;
+              app.stop_presentation(cx);
+            }
+          });
           true
         });
         cx.new(|cx| AudienceView {
@@ -605,6 +669,9 @@ impl PresenterApp {
   /// reports the wrong primary display. Moves the presenter window onto its new monitor and, if
   /// presenting, re-places the audience (fullscreen) on the other. Needs a second screen.
   fn swap_screens(&mut self, cx: &mut Context<Self>) {
+    if self.swap_task.is_some() {
+      return; // a swap is still under way
+    }
     if screen::external(cx).is_none() {
       tracing::info!("swapping screens needs a second display");
       return;
@@ -620,7 +687,11 @@ impl PresenterApp {
         cx.background_executor().timer(Duration::from_millis(700)).await;
         let _ = app.update(cx, |app, cx| app.move_presenter(cx));
         cx.background_executor().timer(Duration::from_millis(800)).await;
-        let _ = app.update(cx, |app, cx| app.start_presentation(cx));
+        let _ = app.update(cx, |app, cx| {
+          // Dropping the task from within its last step is fine: it has nothing left to run.
+          app.swap_task = None;
+          app.start_presentation(cx);
+        });
       }));
     } else {
       self.move_presenter(cx);
@@ -656,12 +727,9 @@ impl PresenterApp {
     self.stop_presentation(cx);
     self.document = None;
     self.blanked = false;
-    self.pointer_norm = None;
-    self.strokes.clear();
-    self.drawing = false;
     self.mode = InputMode::Pointer;
     self.session = Session::new(0);
-    self.cache.clear();
+    self.reset_view();
     self.reload_due = None;
     self.update_watcher(); // drop the file watcher (no document)
   }
@@ -709,11 +777,7 @@ impl PresenterApp {
       Ok(doc) => {
         self.session.set_page_count(doc.page_count());
         self.document = Some(doc);
-        self.cache.clear();
-        self.thumb_cache.clear();
-        self.reset_zoom();
-        self.strokes.clear();
-        self.drawing = false;
+        self.reset_view();
         self.reload_tries = 0;
         tracing::info!("reloaded {}", path.display());
       }
@@ -725,9 +789,21 @@ impl PresenterApp {
           self.wake_after(Duration::from_millis(400), cx);
         } else {
           tracing::warn!("hot reload failed after {} tries: {e:#}", self.reload_tries);
+          self.error = Some(format!("Cannot reload {}, still showing the previous version:\n{e:#}", path.display()));
           self.reload_tries = 0;
         }
       }
+    }
+  }
+
+  /// A camera frame arrived. Only the audience window shows the overlay, so only it redraws (which
+  /// also takes the frame, see `tick`); the presenter window too while it previews the camera.
+  fn camera_frame(&mut self, cx: &mut Context<Self>) {
+    match self.audience {
+      Some(audience) if !self.camera.previewing() => {
+        let _ = audience.update(cx, |_, window, _| window.refresh());
+      }
+      _ => cx.notify(),
     }
   }
 
@@ -760,12 +836,45 @@ impl PresenterApp {
       }
       return;
     }
-    match keystroke.key.as_str() {
+    // Go to a slide: type its number, then Enter (Esc cancels, Backspace corrects).
+    let key = keystroke.key.as_str();
+    if key.len() == 1 && key.as_bytes()[0].is_ascii_digit() {
+      if self.goto_input.len() < 5 {
+        self.goto_input.push_str(key);
+      }
+      cx.stop_propagation();
+      cx.notify();
+      return;
+    }
+    if !self.goto_input.is_empty() {
+      match key {
+        "enter" => {
+          if let Ok(n) = self.goto_input.parse::<isize>() {
+            self.session.goto(n - 1);
+          }
+          self.goto_input.clear();
+        }
+        "backspace" => {
+          self.goto_input.pop();
+        }
+        // Any other key drops the number; Esc does only that, not quit the presentation.
+        "escape" => self.goto_input.clear(),
+        _ => {
+          self.goto_input.clear();
+          return self.on_keystroke(event, cx);
+        }
+      }
+      cx.stop_propagation();
+      cx.notify();
+      return;
+    }
+    match key {
       "right" | "space" | "pagedown" | "down" => self.session.next(),
       "left" | "pageup" | "up" => self.session.prev(),
       "home" => self.session.first(),
       "end" => self.session.last(),
       "r" => self.session.timer_mut().reset(),
+      "k" => self.session.timer_mut().toggle(),
       "l" => self.flip_layout(),
       "+" | "=" => self.adjust_font(2.0),
       "-" => self.adjust_font(-2.0),
@@ -781,7 +890,8 @@ impl PresenterApp {
       "d" => self.clear_drawings(),
       "t" => self.toggle_thumbnails(),
       "s" => self.swap_screens(cx),
-      "w" => self.close_file(cx),
+      // A stray W must not end a talk: while presenting, close with the header button.
+      "w" if !self.presenting => self.close_file(cx),
       "o" => self.pick_file(cx),
       _ => return,
     }
@@ -821,22 +931,29 @@ impl PresenterApp {
         self.session.prev();
       }
     } else {
-      self.scroll_accum += dy;
-      while self.scroll_accum <= -POINT_STEP {
-        self.session.next();
-        self.scroll_accum += POINT_STEP;
+      // One slide per trackpad swipe, however long, so its momentum does not skip slides. A new
+      // touch or a pause starts the next swipe.
+      if event.touch_phase == TouchPhase::Started || self.last_scroll.elapsed() > Duration::from_millis(250) {
+        self.scroll_accum = 0.0;
+        self.swipe_turned = false;
       }
-      while self.scroll_accum >= POINT_STEP {
-        self.session.prev();
-        self.scroll_accum -= POINT_STEP;
+      self.last_scroll = Instant::now();
+      if !self.swipe_turned {
+        self.scroll_accum += dy;
+        if self.scroll_accum <= -POINT_STEP {
+          self.session.next();
+          self.swipe_turned = true;
+        } else if self.scroll_accum >= POINT_STEP {
+          self.session.prev();
+          self.swipe_turned = true;
+        }
       }
     }
     cx.notify();
   }
 
-  /// Timers, background results and reloads, checked whenever the presenter renders.
-  fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-    // Window title carries the open file and its page count (kept out of the header).
+  /// The presenter window's title carries the open file and its page count (kept out of the header).
+  fn update_title(&mut self, window: &mut Window) {
     let want_title = match self.document.as_ref() {
       Some(doc) => format!(
         "{APP_NAME} - {} · {} pages",
@@ -849,6 +966,12 @@ impl PresenterApp {
       window.set_window_title(&want_title);
       self.title = want_title;
     }
+  }
+
+  /// Timers, background results and reloads, checked whenever either window renders: macOS stops
+  /// drawing a covered presenter window (a fullscreen audience on the same screen), and the
+  /// camera, clock and reloads must keep going then.
+  fn tick(&mut self, window: &mut Window, cx: &mut Context<Self>) {
     self.sync_zoom_page();
 
     // Hot reload: reload when the watcher reported a change (debounced via a short due time +
@@ -872,9 +995,10 @@ impl PresenterApp {
     }
     if self.document.is_some() {
       self.sync_recent_page();
-      // Keep the wall clock (and running timer) current while idle.
-      let after = if self.session.timer().is_running() { 250 } else { 1000 };
-      self.wake_after(Duration::from_millis(after), cx);
+      // Keep the wall clock (and running timer) current while idle: one redraw just after each
+      // full second of the clock, the only time the footer changes.
+      let into_second = u64::from(chrono::Local::now().timestamp_subsec_millis().min(999));
+      self.wake_after(Duration::from_millis(1005 - into_second), cx);
     }
     // Throttled persistence; schedule a wake so a change flushes even while idle.
     if self.dirty && self.last_save.elapsed() >= SAVE_THROTTLE {
@@ -972,6 +1096,15 @@ impl PresenterApp {
           "",
           |app, _| app.blanked = !app.blanked,
         ))
+        .child(if self.session.timer().is_running() {
+          button("timer-toggle", Some(Lucide::Pause), "Pause (K)", "Pause the timer", |app, _| {
+            app.session.timer_mut().toggle()
+          })
+        } else {
+          button("timer-toggle", Some(Lucide::Play), "Resume (K)", "Start or resume the timer", |app, _| {
+            app.session.timer_mut().toggle()
+          })
+        })
         .child(button("reset", Some(Lucide::RotateCcw), "Reset time (R)", "", |app, _| {
           app.session.timer_mut().reset()
         }))
@@ -1092,14 +1225,16 @@ impl PresenterApp {
     let step = |id: &'static str, label: Lucide, action: fn(&mut Self)| {
       Button::new(id)
         .icon(Icon::new(label))
-        .small()
+        .xsmall()
         .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
           action(app);
           cx.notify();
         }))
     };
-    let row = |label: &'static str, minus, plus| h_flex().gap_2().child(div().w(px(130.0)).child(label)).child(minus).child(plus);
+    let row = |label: &'static str, minus, plus| h_flex().gap_2().child(div().w(px(100.0)).child(label)).child(minus).child(plus);
+    // The same small text as the header: this menu is for setting up, not for the audience.
     v_flex()
+      .text_xs()
       .gap_2()
       .min_w(px(150.0))
       .child(row(
@@ -1116,6 +1251,7 @@ impl PresenterApp {
       .child(
         Checkbox::new("hot-reload")
           .label("Hot reload")
+          .xsmall()
           .tooltip("Reload when the PDF file changes on disk")
           .checked(self.hot_reload)
           .on_click(cx.listener(|app, checked: &bool, _, cx| {
@@ -1130,8 +1266,12 @@ impl PresenterApp {
       .into_any_element()
   }
 
-  fn footer(&self, cx: &App) -> AnyElement {
-    let slide = format!("Slide {} / {}", self.session.current() + 1, self.session.page_count());
+  fn footer(&self, cx: &mut Context<Self>) -> AnyElement {
+    let slide = if self.goto_input.is_empty() {
+      format!("Slide {} / {}", self.session.current() + 1, self.session.page_count())
+    } else {
+      format!("Go to {}_ / {} (Enter)", self.goto_input, self.session.page_count())
+    };
     let clock = chrono::Local::now().format("%H:%M:%S").to_string();
     let t = self.session.timer();
     let elapsed = format!("{}{}", format_elapsed(t.elapsed()), if t.is_running() { "" } else { "  (paused)" });
@@ -1154,8 +1294,19 @@ impl PresenterApp {
       .child(icon(Lucide::Clock))
       .child(clock)
       .child(dot())
-      .child(icon(Lucide::Timer))
-      .child(elapsed)
+      .child(
+        h_flex()
+          .id("timer")
+          .gap_2()
+          .cursor_pointer()
+          .tooltip(|window, cx| Tooltip::new("Pause / resume the timer (K)").build(window, cx))
+          .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+            app.session.timer_mut().toggle();
+            cx.notify();
+          }))
+          .child(icon(Lucide::Timer))
+          .child(elapsed),
+      )
       .into_any_element()
   }
 
@@ -1441,16 +1592,15 @@ impl PresenterApp {
     let view = SlideView::new(area, aspect);
     let (uv, rect) = view.zoomed(zoom, center);
     // Rendered at extra resolution when zoomed, for crispness.
-    let ppp = window.scale_factor() * zoom.clamp(1.0, MAX_ZOOM_RENDER);
-    let mut pw = (view.fit.width * ppp).round().max(1.0) as u32;
-    let mut ph = (view.fit.height * ppp).round().max(1.0) as u32;
-    if pw > MAX_RENDER_WIDTH {
-      ph = ((ph as f32) * (MAX_RENDER_WIDTH as f32 / pw as f32)).round().max(1.0) as u32;
-      pw = MAX_RENDER_WIDTH;
-    }
+    let scale = window.scale_factor();
+    let px_size = render_size(view.fit, scale * zoom.clamp(1.0, MAX_ZOOM_RENDER));
     let cache = if surface == Surface::Thumb { &mut self.thumb_cache } else { &mut self.cache };
-    if let Some(image) = cache.get_or_render(doc, page, region, [pw, ph]) {
+    if let Some(image) = cache.get_or_render(doc, page, region, px_size) {
       paint_cropped(window, rect, uv, 0.0, image);
+    }
+    // Get the following page ready at this size (unzoomed), so moving forward shows it at once.
+    if surface != Surface::Thumb && page + 1 < doc.page_count() {
+      self.want_prefetch((page + 1, region, render_size(view.fit, scale)), cx);
     }
     if surface == Surface::Audience {
       self.audience_view = Some(view);
@@ -1462,7 +1612,10 @@ impl PresenterApp {
     if !current {
       return;
     }
-    self.listen_to_slide(surface, hitbox, rect, uv, window, cx);
+    if self.link_hover == Some(surface) {
+      window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
+    }
+    self.listen_to_slide(surface, page, hitbox, rect, uv, window, cx);
     // The page's strokes, then the pointer dot (if any) on top, clipped to the slide.
     let color = self.pointer_color;
     window.with_content_mask(Some(ContentMask { bounds: rect.map(px) }), |window| {
@@ -1476,17 +1629,20 @@ impl PresenterApp {
   }
 
   /// Mouse interaction on a current-slide surface shown at `rect` with visible window `uv`:
-  /// laser pointer, freehand drawing, and Ctrl/Cmd+drag panning (when zoomed). The presenter's
-  /// and the audience's slide drive the same state, so annotations and zoom mirror between them.
-  fn listen_to_slide(&self, surface: Surface, hitbox: Hitbox, rect: Bounds<f32>, uv: Bounds<f32>, window: &mut Window, cx: &mut Context<Self>) {
+  /// laser pointer, freehand drawing, Ctrl/Cmd+drag panning (when zoomed), and following links on
+  /// a click. The presenter's and the audience's slide drive the same state, so annotations and
+  /// zoom mirror between them.
+  #[expect(clippy::too_many_arguments, reason = "the paint hands over where and what the slide is")]
+  fn listen_to_slide(&self, surface: Surface, page: usize, hitbox: Hitbox, rect: Bounds<f32>, uv: Bounds<f32>, window: &mut Window, cx: &mut Context<Self>) {
     let app = cx.entity().downgrade();
     window.on_mouse_event({
-      let app = app.clone();
+      let (app, hitbox) = (app.clone(), hitbox.clone());
       move |e: &MouseDownEvent, phase, window, cx| {
         let pos = to_f32(e.position);
         if phase == DispatchPhase::Bubble && e.button == MouseButton::Left && hitbox.is_hovered(window) && rect.contains(&pos) {
           let _ = app.update(cx, |app, cx| {
             app.pressed = Some(surface);
+            app.press_start = Some((pos, Instant::now()));
             app.drag_last = None;
             app.slide_input(pos, e.modifiers, rect, uv);
             cx.notify();
@@ -1496,13 +1652,32 @@ impl PresenterApp {
     });
     window.on_mouse_event({
       let app = app.clone();
-      move |e: &MouseMoveEvent, phase, _, cx| {
+      move |e: &MouseMoveEvent, phase, window, cx| {
         if phase == DispatchPhase::Bubble {
           let _ = app.update(cx, |app, cx| {
-            if app.pressed == Some(surface) {
-              app.slide_input(to_f32(e.position), e.modifiers, rect, uv);
-              cx.notify();
+            if app.pressed.is_none() {
+              // The hand cursor over a link (pointer mode only: drawing over a link draws).
+              let pos = to_f32(e.position);
+              let over = app.mode == InputMode::Pointer
+                && hitbox.is_hovered(window)
+                && rect.contains(&pos)
+                && app.link_at(page, screen_to_slide(rect, uv, pos)).is_some();
+              if over != (app.link_hover == Some(surface)) {
+                app.link_hover = over.then_some(surface);
+                cx.notify();
+              }
+              return;
             }
+            if app.pressed != Some(surface) {
+              return;
+            }
+            // A release outside the window never arrives as a mouse-up: the button is up by now.
+            if e.pressed_button == Some(MouseButton::Left) {
+              app.slide_input(to_f32(e.position), e.modifiers, rect, uv);
+            } else {
+              app.release(surface);
+            }
+            cx.notify();
           });
         }
       }
@@ -1510,15 +1685,89 @@ impl PresenterApp {
     window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
       if phase == DispatchPhase::Bubble && e.button == MouseButton::Left {
         let _ = app.update(cx, |app, cx| {
-          if app.pressed == Some(surface) {
-            app.pressed = None;
-            app.pointer_norm = None;
-            app.drawing = false;
-            cx.notify();
+          if app.pressed != Some(surface) {
+            return;
           }
+          let pos = to_f32(e.position);
+          let click = app
+            .press_start
+            .take()
+            .is_some_and(|(start, at)| at.elapsed() < Duration::from_millis(400) && (start.x - pos.x).hypot(start.y - pos.y) < 6.0);
+          app.release(surface);
+          if click
+            && app.mode == InputMode::Pointer
+            && !crate::platform::zoom_modifier(e.modifiers)
+            && let Some(target) = app.link_at(page, screen_to_slide(rect, uv, pos))
+          {
+            app.follow(target, cx);
+          }
+          cx.notify();
         });
       }
     });
+  }
+
+  /// Where the link at slide point `n` of `page` leads, if one is there.
+  fn link_at(&mut self, page: usize, n: Point<f32>) -> Option<LinkTarget> {
+    let doc = self.document.as_ref()?;
+    let links = self.links.entry(page).or_insert_with(|| Rc::new(doc.slide_links(page)));
+    links.iter().find(|link| link.area.contains(n.x, n.y)).map(|link| link.target.clone())
+  }
+
+  fn follow(&mut self, target: LinkTarget, cx: &mut Context<Self>) {
+    match target {
+      LinkTarget::Page(page) => self.session.goto(page as isize),
+      // Web and mail addresses only: a PDF can name any program or file, and the system would open it.
+      LinkTarget::Uri(uri) if is_web_link(&uri) => cx.open_url(&uri),
+      LinkTarget::Uri(uri) => tracing::warn!("not opening link {uri}: only http, https and mailto are followed"),
+    }
+  }
+
+  /// Queue a picture to render once the current frame is on screen.
+  fn want_prefetch(&mut self, item: (usize, Region, [u32; 2]), cx: &mut Context<Self>) {
+    if !self.prefetch.contains(&item) {
+      self.prefetch.push(item);
+    }
+    if self.prefetch_task.is_some() {
+      return;
+    }
+    self.prefetch_task = Some(cx.spawn(async move |app, cx| {
+      loop {
+        // One picture per pause, so input between them is handled at once.
+        cx.background_executor().timer(Duration::from_millis(30)).await;
+        match app.update(cx, |app, _| app.prefetch_one()) {
+          Ok(true) => {}
+          Ok(false) | Err(_) => break,
+        }
+      }
+      // Dropping the task from within its last step is fine: it has nothing left to run.
+      let _ = app.update(cx, |app, _| app.prefetch_task = None);
+    }));
+  }
+
+  /// Render the oldest queued picture still near the current slide. Returns whether more wait.
+  fn prefetch_one(&mut self) -> bool {
+    if self.prefetch.is_empty() {
+      return false;
+    }
+    let (page, region, size) = self.prefetch.remove(0);
+    let current = self.session.current();
+    if let Some(doc) = self.document.as_ref()
+      && (current..=current + 2).contains(&page)
+      && page < doc.page_count()
+    {
+      self.cache.get_or_render(doc, page, region, size);
+    }
+    !self.prefetch.is_empty()
+  }
+
+  /// The left button let go of `surface`: hide the pointer and end the stroke.
+  fn release(&mut self, surface: Surface) {
+    if self.pressed == Some(surface) {
+      self.pressed = None;
+      self.pointer_norm = None;
+      self.drawing = false;
+    }
   }
 
   /// The held mouse at `pos`: pan with Ctrl/Cmd, else move the pointer or extend the stroke.
@@ -1562,8 +1811,8 @@ impl PresenterApp {
 
   /// The audience window: only the slide, on black (or black alone while blanked).
   /// Double-click toggles fullscreen.
-  fn render_audience(&mut self, cx: &mut Context<Self>) -> AnyElement {
-    self.sync_zoom_page();
+  fn render_audience(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
+    self.tick(window, cx);
     let slide = self
       .document
       .as_ref()
@@ -1639,6 +1888,9 @@ impl PresenterApp {
       ("C", "Toggle the webcam overlay"),
       ("W", "Close file, back to start screen"),
       ("R", "Reset the talk timer"),
+      ("K / click the timer", "Pause / resume the talk timer"),
+      ("Number + Enter", "Go to that slide"),
+      ("Click a link", "Follow it (pointer mode)"),
       ("L", "Flip layout (H/V with no notes; 4 presets with notes)"),
       ("T", "Toggle the slide thumbnail strip"),
       ("S", "Swap presenter / presentation screens"),
@@ -1834,6 +2086,7 @@ impl PresenterApp {
 
 impl Render for PresenterApp {
   fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.update_title(window);
     self.tick(window, cx);
     let theme = cx.theme();
     let (background, foreground) = (theme.background, theme.foreground);
@@ -1867,6 +2120,7 @@ impl Render for PresenterApp {
     let shortcuts = self.show_shortcuts.then(|| self.shortcuts_card(cx));
     let about = self.show_about.then(|| self.about_card(cx));
     let update = self.update_card(cx);
+    let error = self.error.clone().map(|e| self.card("error", "Error", Some(|app| app.error = None), e, cx));
     v_flex()
       .relative()
       .size_full()
@@ -1888,6 +2142,7 @@ impl Render for PresenterApp {
       .children(shortcuts)
       .children(about)
       .children(update)
+      .children(error)
   }
 }
 
@@ -1898,8 +2153,8 @@ struct AudienceView {
 }
 
 impl Render for AudienceView {
-  fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-    self.app.update(cx, |app, cx| app.render_audience(cx))
+  fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    self.app.update(cx, |app, cx| app.render_audience(window, cx))
   }
 }
 
@@ -2050,10 +2305,25 @@ pub(crate) fn paint_cropped(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f
   }
 }
 
-/// A picture as GPUI draws it (BGRA).
-pub(crate) fn render_image(mut picture: image::RgbaImage) -> Arc<RenderImage> {
-  picture.pixels_mut().for_each(|p| p.0.swap(0, 2));
-  Arc::new(RenderImage::new(vec![image::Frame::new(picture)]))
+/// A picture for GPUI, whose pixels are already in its BGRA order.
+pub(crate) fn render_image(bgra: image::RgbaImage) -> Arc<RenderImage> {
+  Arc::new(RenderImage::new(vec![image::Frame::new(bgra)]))
+}
+
+/// Whether `uri` is a web or mail address, the only links followed.
+fn is_web_link(uri: &str) -> bool {
+  let lower = uri.trim_start().to_ascii_lowercase();
+  ["https://", "http://", "mailto:"].iter().any(|scheme| lower.starts_with(scheme))
+}
+
+/// The pixel size to render a picture shown `fit` big at `ppp` pixels per point. The width is
+/// rounded up to steps about 9% apart, so resizing a panel or zooming re-renders only now and then
+/// instead of on every frame.
+fn render_size(fit: Size<f32>, ppp: f32) -> [u32; 2] {
+  let exact = (fit.width * ppp).max(1.0);
+  let w = 2f32.powf((exact.log2() * 8.0).ceil() / 8.0).round().clamp(1.0, MAX_RENDER_WIDTH as f32);
+  let h = (w * fit.height / fit.width.max(1e-3)).round().max(1.0);
+  [w as u32, h as u32]
 }
 
 /// A filled circle, optionally with a thin rim.
@@ -2100,31 +2370,35 @@ fn paint_stroke(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f32>, stroke:
 
 type TexKey = (usize, Region, u32);
 
-/// Bounded **LRU** cache of rendered pictures keyed by (page, region, pixel width).
+/// **LRU** cache of rendered pictures keyed by (page, region, pixel width), bounded by memory.
 ///
 /// Evicted (and cleared) pictures wait in `evicted` until a paint takes them off the GPU. LRU
 /// means eviction only ever removes the least-recently-used picture, never one drawn this frame
-/// (a frame touches far fewer pictures than `capacity`).
+/// (a frame uses far less than the budget).
 struct TextureCache {
-  map: HashMap<TexKey, Arc<RenderImage>>,
+  map: HashMap<TexKey, (Arc<RenderImage>, usize)>,
   order: VecDeque<TexKey>,
-  capacity: usize,
+  /// Bytes held, and the most to hold.
+  bytes: usize,
+  budget: usize,
   evicted: Vec<Arc<RenderImage>>,
 }
 
 impl TextureCache {
-  fn new(capacity: usize) -> Self {
+  fn new(budget: usize) -> Self {
     Self {
       map: HashMap::new(),
       order: VecDeque::new(),
-      capacity,
+      bytes: 0,
+      budget,
       evicted: Vec::new(),
     }
   }
 
   fn clear(&mut self) {
-    self.evicted.extend(self.map.drain().map(|(_, image)| image));
+    self.evicted.extend(self.map.drain().map(|(_, (image, _))| image));
     self.order.clear();
+    self.bytes = 0;
   }
 
   /// Mark `key` as most-recently-used.
@@ -2137,7 +2411,7 @@ impl TextureCache {
 
   fn get_or_render(&mut self, doc: &Document, page: usize, region: Region, target_px: [u32; 2]) -> Option<Arc<RenderImage>> {
     let key = (page, region, target_px[0]);
-    if let Some(image) = self.map.get(&key).cloned() {
+    if let Some((image, _)) = self.map.get(&key).cloned() {
       self.touch(key);
       return Some(image);
     }
@@ -2146,18 +2420,23 @@ impl TextureCache {
       Region::Slide => doc.render_slide(page, target_px).map(Some),
       Region::Notes => doc.render_notes(page, target_px),
     };
-    let image = match picture {
-      Ok(picture) => render_image(picture?),
+    let picture = match picture {
+      Ok(picture) => picture?,
       Err(e) => {
         tracing::error!("render {region:?} page {page}: {e:#}");
         return None;
       }
     };
+    let size = picture.as_raw().len();
+    let image = render_image(picture);
 
-    self.map.insert(key, image.clone());
+    self.map.insert(key, (image.clone(), size));
     self.order.push_back(key);
-    while self.order.len() > self.capacity {
-      if let Some(old) = self.order.pop_front().and_then(|old| self.map.remove(&old)) {
+    self.bytes += size;
+    // Keep at least the picture just made, however large.
+    while self.bytes > self.budget && self.order.len() > 1 {
+      if let Some((old, old_size)) = self.order.pop_front().and_then(|old| self.map.remove(&old)) {
+        self.bytes -= old_size;
         self.evicted.push(old);
       }
     }
@@ -2192,6 +2471,26 @@ mod tests {
     let (uv, rect) = view.zoomed(4.0, center);
     let moved = slide_to_screen(rect, uv, anchor);
     assert!((moved.x - cursor.x).hypot(moved.y - cursor.y) < 0.01, "{moved:?}");
+  }
+
+  #[test]
+  fn render_sizes_round_up_in_few_steps_and_keep_the_aspect() {
+    let mut sizes = std::collections::BTreeSet::new();
+    for w in 1000..1500 {
+      let fit = size(w as f32, w as f32 * 9.0 / 16.0);
+      let [pw, ph] = render_size(fit, 1.0);
+      assert!(pw as f32 >= fit.width && (pw as f32) < fit.width * 1.1, "{w} -> {pw}");
+      assert!((pw as f32 / ph as f32 - 16.0 / 9.0).abs() < 0.01, "{pw}x{ph}");
+      sizes.insert(pw);
+    }
+    assert!(sizes.len() <= 6, "{sizes:?}");
+    assert_eq!(render_size(size(9000.0, 5000.0), 2.0)[0], MAX_RENDER_WIDTH);
+  }
+
+  #[test]
+  fn only_web_and_mail_links_are_followed() {
+    assert!(is_web_link("https://typst.app") && is_web_link("HTTP://x") && is_web_link("mailto:a@b.ch"));
+    assert!(!is_web_link("file:///etc/passwd") && !is_web_link("javascript:alert(1)") && !is_web_link("../talk.pdf"));
   }
 
   #[test]

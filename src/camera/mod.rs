@@ -24,7 +24,7 @@ pub struct CameraInfo {
   pub name: String,
 }
 
-/// One decoded RGBA frame.
+/// One decoded frame: RGBA while it is processed, BGRA once [`CameraStream`] hands it out.
 pub struct Frame {
   pub width: u32,
   pub height: u32,
@@ -60,8 +60,9 @@ pub struct CameraStream {
 }
 
 impl CameraStream {
-  /// Start capturing from the camera with the given id (`None` = first device).
-  pub fn start(id: Option<String>, background: Arc<AtomicU8>, waker: crate::Waker) -> Self {
+  /// Start capturing from the camera with the given id (`None` = first device). Frames come out
+  /// mirrored when `mirror` is set and in GPUI's BGRA order, so the UI thread only uploads them.
+  pub fn start(id: Option<String>, background: Arc<AtomicU8>, mirror: Arc<AtomicBool>, waker: crate::Waker) -> Self {
     let shared = Arc::new(Shared::default());
     let stop = Arc::new(AtomicBool::new(false));
     let (finished_tx, finished_rx) = mpsc::sync_channel(1);
@@ -95,13 +96,14 @@ impl CameraStream {
               }
               if let Some(s) = segmenter.as_mut() {
                 frame = s.process(frame);
+                // Removing keeps the full frame: cropping to the person made the overlay rescale
+                // whenever they moved.
                 if mode == crate::config::BackgroundMode::Blur {
                   processing::composite_blur(&mut frame);
-                } else if mode == crate::config::BackgroundMode::Remove {
-                  processing::crop_to_visible(&mut frame, 0.08);
                 }
               }
             }
+            processing::to_bgra(&mut frame, mirror.load(Ordering::Relaxed));
             if let Ok(mut slot) = shared.latest.lock() {
               *slot = Some(frame);
             }

@@ -2,7 +2,7 @@
 //! builds the settings controls. Keeps `app.rs` free of camera details.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::time::{Duration, Instant};
 
@@ -46,7 +46,11 @@ pub struct CameraController {
   show_details: bool,
   /// Shared with the capture thread; toggles segmentation without restarting the camera.
   background: Arc<AtomicU8>,
+  /// Shared with the capture thread, like `background`.
+  mirror: Arc<AtomicBool>,
   waker: Waker,
+  /// Wakes the UI for a new frame: only the audience window, which shows the overlay, redraws.
+  frames: Waker,
   /// When the UI should look again (stopping, discovery or a first frame is pending).
   poll_after: Option<Duration>,
   pub size_slider: Entity<SliderState>,
@@ -62,18 +66,16 @@ fn selected_available_device(current: Option<&str>, devices: &[CameraInfo]) -> O
     .map(str::to_owned)
 }
 
-/// A captured frame as GPUI draws it, flipped horizontally when `mirror` is set.
-fn frame_image(frame: Frame, mirror: bool) -> Option<Arc<RenderImage>> {
-  let mut picture = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
-  if mirror {
-    image::imageops::flip_horizontal_in_place(&mut picture);
-  }
+/// A captured frame (already BGRA and mirrored by the capture thread) as GPUI draws it.
+fn frame_image(frame: Frame) -> Option<Arc<RenderImage>> {
+  let picture = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
   Some(crate::app::render_image(picture))
 }
 
 impl CameraController {
-  pub fn new(settings: CameraSettings, waker: Waker, cx: &mut App) -> Self {
+  pub fn new(settings: CameraSettings, waker: Waker, frames: Waker, cx: &mut App) -> Self {
     let background = Arc::new(AtomicU8::new(settings.background.to_u8()));
+    let mirror = Arc::new(AtomicBool::new(settings.mirror));
     let size_slider = cx.new(|_| SliderState::new().min(0.08).max(0.5).step(0.01).default_value(settings.size));
     Self {
       settings,
@@ -94,10 +96,17 @@ impl CameraController {
       preview_open: false,
       show_details: false,
       background,
+      mirror,
       waker,
+      frames,
       poll_after: None,
       size_slider,
     }
+  }
+
+  /// Whether the settings popover shows the preview (then the presenter window needs the frames too).
+  pub fn previewing(&self) -> bool {
+    self.preview_open
   }
 
   fn poll_in(&mut self, after: Duration) {
@@ -125,6 +134,7 @@ impl CameraController {
     let wanted = self.settings.enabled && (presenting || self.preview_seen);
     self.preview_seen = false;
     self.background.store(self.settings.background.to_u8(), Ordering::Relaxed);
+    self.mirror.store(self.settings.mirror, Ordering::Relaxed);
     self.poll_discovery();
     self.poll_stopping();
     if wanted && !self.discovery_done && self.discovery.is_none() {
@@ -188,10 +198,15 @@ impl CameraController {
         return;
       };
       self.running_device = Some(device.clone());
-      self.stream = Some(CameraStream::start(Some(device), self.background.clone(), self.waker.clone()));
+      self.stream = Some(CameraStream::start(
+        Some(device),
+        self.background.clone(),
+        self.mirror.clone(),
+        self.frames.clone(),
+      ));
     }
     if let Some(frame) = self.stream.as_ref().and_then(|s| s.take_frame()) {
-      if let Some(image) = frame_image(frame, self.settings.mirror) {
+      if let Some(image) = frame_image(frame) {
         self.set_image(Some(image), window, cx);
       }
     } else if self.stream.is_some() {
@@ -254,6 +269,7 @@ impl CameraController {
     }
     let enabled = Checkbox::new("camera-enabled")
       .label("Camera (C)")
+      .xsmall()
       .checked(self.settings.enabled)
       .on_click(cx.listener(|app, checked: &bool, _, cx| {
         app.camera.set_enabled(*checked);
@@ -265,13 +281,13 @@ impl CameraController {
     }
     let theme = cx.theme();
     let (danger, warning, muted) = (theme.danger, theme.warning, theme.muted_foreground);
-    let note = |text: &str| div().text_sm().text_color(muted).child(text.to_owned());
+    let note = |text: &str| div().text_color(muted).child(text.to_owned());
 
-    let mut col = v_flex().gap_2().w(px(400.)).child(enabled).child(
+    let mut col = v_flex().gap_2().w(px(320.)).child(enabled).child(
       h_flex().gap_2().child("Source").child(
         Button::new("camera-rescan")
           .icon(Icon::new(Lucide::RefreshCw))
-          .small()
+          .xsmall()
           .tooltip("Rescan cameras")
           .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
             app.camera.refresh_devices();
@@ -291,6 +307,7 @@ impl CameraController {
       col = col.child(
         Radio::new(("camera-device", i))
           .label(d.name.clone())
+          .xsmall()
           .checked(is_selected)
           .on_click(cx.listener(move |app, _: &bool, window, cx| {
             if app.camera.settings.device.as_deref() != Some(id.as_str()) {
@@ -317,16 +334,20 @@ impl CameraController {
     }
 
     let corners = [
-      (Corner::TopLeft, "↖"),
-      (Corner::TopRight, "↗"),
-      (Corner::BottomLeft, "↙"),
-      (Corner::BottomRight, "↘"),
+      (Corner::TopLeft, "Top left", Some(Lucide::ArrowUpLeft)),
+      (Corner::TopRight, "Top right", Some(Lucide::ArrowUpRight)),
+      (Corner::BottomLeft, "Bottom left", Some(Lucide::ArrowDownLeft)),
+      (Corner::BottomRight, "Bottom right", Some(Lucide::ArrowDownRight)),
     ];
-    let shapes = [(CameraShape::Rect, "Rect"), (CameraShape::Rounded, "Rounded"), (CameraShape::Circle, "Circle")];
+    let shapes = [
+      (CameraShape::Rect, "Rect", None),
+      (CameraShape::Rounded, "Rounded", None),
+      (CameraShape::Circle, "Circle", None),
+    ];
     let backgrounds = [
-      (BackgroundMode::Off, "Keep"),
-      (BackgroundMode::Remove, "Remove"),
-      (BackgroundMode::Blur, "Blur"),
+      (BackgroundMode::Off, "Keep", None),
+      (BackgroundMode::Remove, "Remove", None),
+      (BackgroundMode::Blur, "Blur", None),
     ];
     col = col
       .child(choice_row("Corner", &corners, self.settings.corner, cx, |s, v| s.corner = v))
@@ -335,6 +356,7 @@ impl CameraController {
       .child(
         Checkbox::new("camera-mirror")
           .label("Mirror")
+          .xsmall()
           .checked(self.settings.mirror)
           .on_click(cx.listener(|app, checked: &bool, _, cx| {
             app.camera.settings.mirror = *checked;
@@ -350,7 +372,7 @@ impl CameraController {
         .child(
           Button::new("camera-retry")
             .label("Retry")
-            .small()
+            .xsmall()
             .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
               app.camera.refresh_devices();
               app.camera.retry();
@@ -376,6 +398,7 @@ impl CameraController {
           .icon(Icon::new(if self.show_details { Lucide::ChevronDown } else { Lucide::ChevronRight }))
           .label("Capture details")
           .ghost()
+          .xsmall()
           .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
             app.camera.show_details = !app.camera.show_details;
             cx.notify();
@@ -389,7 +412,7 @@ impl CameraController {
     if let Some(image) = self.image.clone() {
       let frame = image.size(0);
       let (tw, th) = (frame.width.0, frame.height.0);
-      let w = 260.0;
+      let w = 240.0;
       let h = w * th as f32 / tw.max(1) as f32;
       // Dark backdrop so a removed background is visible as transparency.
       col = col
@@ -495,10 +518,11 @@ impl CameraController {
   }
 }
 
-/// A label and a row of buttons, one selected, that set one camera setting.
+/// A label and a row of buttons, one selected, that set one camera setting. A choice with an icon
+/// shows the icon and names itself in the tooltip.
 fn choice_row<T: Copy + PartialEq + 'static>(
   label: &'static str,
-  choices: &[(T, &'static str)],
+  choices: &[(T, &'static str, Option<Lucide>)],
   current: T,
   cx: &mut Context<PresenterApp>,
   set: fn(&mut CameraSettings, T),
@@ -506,16 +530,19 @@ fn choice_row<T: Copy + PartialEq + 'static>(
   h_flex()
     .gap_1()
     .child(div().mr_1().child(label))
-    .children(choices.iter().enumerate().map(|(i, &(value, text))| {
-      Button::new((label, i))
-        .label(text)
-        .small()
-        .selected(value == current)
-        .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
-          set(&mut app.camera.settings, value);
-          app.dirty = true;
-          cx.notify();
-        }))
+    .children(choices.iter().enumerate().map(|(i, &(value, text, icon))| {
+      let button = Button::new((label, i));
+      match icon {
+        Some(icon) => button.icon(Icon::new(icon)).tooltip(text),
+        None => button.label(text),
+      }
+      .xsmall()
+      .selected(value == current)
+      .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+        set(&mut app.camera.settings, value);
+        app.dirty = true;
+        cx.notify();
+      }))
     }))
 }
 

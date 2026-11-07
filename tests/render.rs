@@ -35,6 +35,10 @@ fn render_pipeline_smoke() {
     "rendered page should not be a single flat color"
   );
 
+  // Pixels come in GPUI's BGRA order: the crimson logo square (#AA0159) has its red third.
+  let [b, _, r, _] = img.get_pixel(600, 200).0;
+  assert!(r > 150 && b < 110, "logo pixel b={b} r={r}: red and blue swapped?");
+
   // Plain deck has no notes region.
   assert!(plain.render_notes(0, [400, 300]).expect("notes ok").is_none());
 
@@ -51,4 +55,14 @@ fn render_pipeline_smoke() {
   assert_eq!((slide.width(), slide.height()), (640, 360));
   let notes_img = notes.render_notes(0, [640, 360]).expect("notes ok").expect("notes present");
   assert_eq!((notes_img.width(), notes_img.height()), (640, 360));
+
+  // The notes half rendered on its own matches the right half of the whole page.
+  let whole = notes.render_page(0, [1280, 360]).expect("render whole page");
+  let right = image::imageops::crop_imm(&whole, 640, 0, 640, 360).to_image();
+  let differing = notes_img
+    .pixels()
+    .zip(right.pixels())
+    .filter(|(a, b)| a.0.iter().zip(b.0).any(|(x, y)| x.abs_diff(y) > 8))
+    .count();
+  assert!(differing < 640 * 360 / 100, "{differing} pixels differ");
 }

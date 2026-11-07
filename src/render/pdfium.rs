@@ -8,7 +8,7 @@ use anyhow::{Context, Result, anyhow};
 use image::RgbaImage;
 use pdfium_render::prelude::*;
 
-use super::{PageRenderer, PageSize};
+use super::{Link, LinkTarget, PageRenderer, PageSize, Region};
 
 thread_local! {
     /// The PDFium library is initialized once per thread and intentionally leaked so
@@ -137,16 +137,64 @@ impl PageRenderer for PdfiumRenderer {
     self.page_sizes.get(page).copied().unwrap_or(PageSize { width: 1.0, height: 1.0 })
   }
 
-  fn render(&self, page: usize, target_px: [u32; 2]) -> Result<RgbaImage> {
-    let [w, h] = target_px;
+  fn render(&self, page: usize, region: Region, target_px: [u32; 2]) -> Result<RgbaImage> {
+    let [w, h] = [target_px[0].max(1), target_px[1].max(1)];
     let index: u16 = page.try_into().map_err(|_| anyhow!("page index {page} out of range"))?;
-
     let pdf_page = self.document.pages().get(index).with_context(|| format!("getting page {page}"))?;
 
-    let config = PdfRenderConfig::new().set_target_width(w.max(1) as i32).set_target_height(h.max(1) as i32);
+    // The whole page at the scale that makes `region` land on `target_px`.
+    let full = [(w as f32 / region.w.max(1e-3)).round(), (h as f32 / region.h.max(1e-3)).round()];
+    // pdfium-render asks for RGBA by default; keep PDFium's native BGRA, which GPUI draws as is.
+    let mut config = PdfRenderConfig::new()
+      .set_reverse_byte_order(false)
+      .set_target_width(full[0] as i32)
+      .set_target_height(full[1] as i32);
+    if !region.is_full() {
+      // Only the region: shift the page so it starts at the bitmap's corner, and draw nothing else.
+      let size = self.page_size(page);
+      config = config
+        .translate(PdfPoints::new(-region.x * size.width), PdfPoints::new(-region.y * size.height))
+        .with_context(|| format!("placing page {page}"))?
+        .clip(0, 0, w as i32, h as i32);
+    }
+    let mut bitmap =
+      PdfBitmap::empty(w as i32, h as i32, PdfBitmapFormat::BGRA, self.document.bindings()).with_context(|| format!("allocating {w}x{h} for page {page}"))?;
+    pdf_page
+      .render_into_bitmap_with_config(&mut bitmap, &config)
+      .with_context(|| format!("rendering page {page}"))?;
+    // BGRA as it comes: GPUI draws BGRA, so no channel swap on either side.
+    RgbaImage::from_raw(w, h, bitmap.as_raw_bytes()).with_context(|| format!("page {page}: unexpected bitmap layout"))
+  }
 
-    let bitmap = pdf_page.render_with_config(&config).with_context(|| format!("rendering page {page}"))?;
-
-    Ok(bitmap.as_image().into_rgba8())
+  fn links(&self, page: usize) -> Vec<Link> {
+    let Ok(index) = u16::try_from(page) else { return Vec::new() };
+    let Ok(pdf_page) = self.document.pages().get(index) else {
+      return Vec::new();
+    };
+    let size = self.page_size(page);
+    let links = pdf_page.links();
+    links
+      .iter()
+      .filter_map(|link| {
+        let target = match (link.destination(), link.action()) {
+          (Some(dest), _) => LinkTarget::Page(dest.page_index().ok()?.into()),
+          (None, Some(action)) => match (action.as_local_destination_action(), action.as_uri_action()) {
+            (Some(local), _) => LinkTarget::Page(local.destination().ok()?.page_index().ok()?.into()),
+            (None, Some(uri)) => LinkTarget::Uri(uri.uri().ok()?),
+            (None, None) => return None,
+          },
+          (None, None) => return None,
+        };
+        // PDF rectangles count up from the bottom; ours from the top. (Assumes the media box starts at 0.)
+        let r = link.rect().ok()?;
+        let area = Region {
+          x: r.left().value / size.width,
+          y: 1.0 - r.top().value / size.height,
+          w: (r.right().value - r.left().value) / size.width,
+          h: (r.top().value - r.bottom().value) / size.height,
+        };
+        Some(Link { area, target })
+      })
+      .collect()
   }
 }
