@@ -1,7 +1,7 @@
 //! Webcam capture. Only `nokhwa.rs` names nokhwa types; everything else uses this API.
 //!
 //! A [`CameraStream`] owns one capture thread that keeps only the newest frame. The UI
-//! polls [`CameraStream::take_frame`] and is woken through `egui::Context::request_repaint`.
+//! polls [`CameraStream::take_frame`] and is woken through a [`crate::Waker`].
 
 pub mod controller;
 mod nokhwa;
@@ -61,7 +61,7 @@ pub struct CameraStream {
 
 impl CameraStream {
   /// Start capturing from the camera with the given id (`None` = first device).
-  pub fn start(id: Option<String>, background: Arc<AtomicU8>, ctx: egui::Context) -> Self {
+  pub fn start(id: Option<String>, background: Arc<AtomicU8>, waker: crate::Waker) -> Self {
     let shared = Arc::new(Shared::default());
     let stop = Arc::new(AtomicBool::new(false));
     let (finished_tx, finished_rx) = mpsc::sync_channel(1);
@@ -79,7 +79,7 @@ impl CameraStream {
             if let Ok(mut d) = shared.diag.lock() {
               d.push(line);
             }
-            ctx.request_repaint();
+            waker.wake();
           };
           nokhwa::capture(id.as_deref(), &stop, &mut note, |mut frame| {
             let mode = crate::config::BackgroundMode::from_u8(background.load(Ordering::Relaxed));
@@ -106,7 +106,7 @@ impl CameraStream {
               *slot = Some(frame);
             }
             shared.first_frame.store(true, Ordering::Release);
-            ctx.request_repaint();
+            waker.wake();
           })
         }));
         let message = match result {
@@ -119,7 +119,7 @@ impl CameraStream {
           if let Ok(mut slot) = shared.error.lock() {
             *slot = Some(message);
           }
-          ctx.request_repaint();
+          waker.wake();
         }
         shared.finished.store(true, Ordering::Release);
         let _ = finished_tx.send(());

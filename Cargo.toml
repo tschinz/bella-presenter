@@ -35,38 +35,22 @@ exec_args = "%f"
 info_plist_exts = ["bundle/info-ext.plist"]
 
 [dependencies]
-eframe = { version = "0.33", features = ["wgpu"] }
-egui = "0.33"
-egui_extras = { version = "0.33", features = ["image"] }
+# GPUI (and its component library) through one crates.io dependency.
+gpui-kit = "=0.7.0"
+# The channel that wakes the UI from capture, watcher and worker threads; already in GPUI's tree.
+futures = "0.3"
 pdfium-render = "0.8"
 image = { version = "0.25", default-features = false, features = ["png"] }
-directories = "5"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-thiserror = "1"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 rfd = "0.15"
-display-info = "0.5"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 notify = "8.2.0"
 nokhwa = { version = "0.10.11", features = ["input-native"] }
 ort = "2.0.0-rc.13"
-
-# macOS "Open with" / double-click delivers the file as an Apple Event, not as an argument.
-[target.'cfg(target_os = "macos")'.dependencies]
-objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = [
-    "std",
-    "NSAppleEventDescriptor",
-    "NSAppleEventManager",
-    "NSNotification",
-    "NSObject",
-    "NSString",
-    "NSURL",
-    "objc2-core-services",
-] }
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering

@@ -1,26 +1,37 @@
-//! UI-side camera state: owns the stream and texture, draws the overlay, and shows the
-//! settings controls. Keeps `app.rs` free of camera details.
+//! UI-side camera state: owns the stream and the picture GPUI draws, paints the overlay, and
+//! builds the settings controls. Keeps `app.rs` free of camera details.
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use egui::{Color32, Rect, TextureHandle, TextureOptions, pos2};
+use gpui_kit::assets::IconName as Lucide;
+use gpui_kit::component::button::{Button, ButtonVariants};
+use gpui_kit::component::checkbox::Checkbox;
+use gpui_kit::component::radio::Radio;
+use gpui_kit::component::slider::{Slider, SliderState};
+use gpui_kit::component::{ActiveTheme, Icon, Selectable, Sizable, h_flex, v_flex};
+use gpui_kit::{
+  AnyElement, App, AppContext, Bounds, ClickEvent, Context, Entity, IntoElement, ParentElement, RenderImage, Styled, Window, div, img, point, px, rgb, size,
+};
 
 use super::overlay::place;
-use super::{CameraInfo, CameraStream, list_available_cameras, request_permission};
+use super::{CameraInfo, CameraStream, Frame, list_available_cameras, request_permission};
+use crate::Waker;
+use crate::app::PresenterApp;
 use crate::config::{BackgroundMode, CameraSettings, CameraShape, Corner};
 
 pub struct CameraController {
   pub settings: CameraSettings,
   stream: Option<CameraStream>,
-  texture: Option<TextureHandle>,
+  /// The newest frame, as GPUI draws it (mirrored when the settings ask for it).
+  image: Option<Arc<RenderImage>>,
   devices: Vec<CameraInfo>,
   /// Device the running stream was started with (to detect a change).
   running_device: Option<String>,
   stopping: Option<Receiver<()>>,
-  stopping_since: Option<std::time::Instant>,
+  stopping_since: Option<Instant>,
   discovery: Option<Receiver<anyhow::Result<Vec<CameraInfo>>>>,
   discovery_requested: bool,
   discovery_done: bool,
@@ -28,10 +39,17 @@ pub struct CameraController {
   diagnostics: Vec<String>,
   capture_failed: bool,
   permission_requested: bool,
-  /// Set by `settings_ui` while the settings popover is open (the preview needs frames).
+  /// Set by `settings_ui` while the settings popover is shown (the preview needs frames).
   preview_seen: bool,
+  /// Whether the settings popover was shown on the previous frame.
+  preview_open: bool,
+  show_details: bool,
   /// Shared with the capture thread; toggles segmentation without restarting the camera.
   background: Arc<AtomicU8>,
+  waker: Waker,
+  /// When the UI should look again (stopping, discovery or a first frame is pending).
+  poll_after: Option<Duration>,
+  pub size_slider: Entity<SliderState>,
 }
 
 const CAMERA_STARTUP_TIMEOUT: Duration = Duration::from_secs(8);
@@ -44,13 +62,23 @@ fn selected_available_device(current: Option<&str>, devices: &[CameraInfo]) -> O
     .map(str::to_owned)
 }
 
+/// A captured frame as GPUI draws it, flipped horizontally when `mirror` is set.
+fn frame_image(frame: Frame, mirror: bool) -> Option<Arc<RenderImage>> {
+  let mut picture = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba)?;
+  if mirror {
+    image::imageops::flip_horizontal_in_place(&mut picture);
+  }
+  Some(crate::app::render_image(picture))
+}
+
 impl CameraController {
-  pub fn new(settings: CameraSettings) -> Self {
+  pub fn new(settings: CameraSettings, waker: Waker, cx: &mut App) -> Self {
     let background = Arc::new(AtomicU8::new(settings.background.to_u8()));
+    let size_slider = cx.new(|_| SliderState::new().min(0.08).max(0.5).step(0.01).default_value(settings.size));
     Self {
       settings,
       stream: None,
-      texture: None,
+      image: None,
       devices: Vec::new(),
       running_device: None,
       stopping: None,
@@ -63,18 +91,41 @@ impl CameraController {
       capture_failed: false,
       permission_requested: false,
       preview_seen: false,
+      preview_open: false,
+      show_details: false,
       background,
+      waker,
+      poll_after: None,
+      size_slider,
     }
   }
 
-  /// Start, stop or restart the capture so it matches the settings, and upload any new frame.
+  fn poll_in(&mut self, after: Duration) {
+    self.poll_after = Some(self.poll_after.map_or(after, |p| p.min(after)));
+  }
+
+  /// Replace the shown picture, taking the old one off the GPU.
+  fn set_image(&mut self, image: Option<Arc<RenderImage>>, window: &mut Window, cx: &mut App) {
+    if let Some(old) = std::mem::replace(&mut self.image, image) {
+      cx.drop_image(old, Some(window));
+    }
+  }
+
+  /// Start, stop or restart the capture so it matches the settings, and take any new frame.
   /// The camera only runs while enabled and either presenting or previewing in the settings
-  /// popover, so an idle app keeps the device (and its LED) off. Call once per presenter frame.
-  pub fn update(&mut self, ctx: &egui::Context, presenting: bool) {
+  /// popover, so an idle app keeps the device (and its LED) off. Call once per presenter frame;
+  /// returns when to call again if nothing else wakes the UI.
+  pub fn update(&mut self, presenting: bool, window: &mut Window, cx: &mut App) -> Option<Duration> {
+    self.run(presenting, window, cx);
+    self.poll_after.take()
+  }
+
+  fn run(&mut self, presenting: bool, window: &mut Window, cx: &mut App) {
+    self.preview_open = self.preview_seen;
     let wanted = self.settings.enabled && (presenting || self.preview_seen);
     self.preview_seen = false;
     self.background.store(self.settings.background.to_u8(), Ordering::Relaxed);
-    self.poll_discovery(ctx);
+    self.poll_discovery();
     self.poll_stopping();
     if wanted && !self.discovery_done && self.discovery.is_none() {
       if !self.permission_requested {
@@ -84,24 +135,24 @@ impl CameraController {
       self.discovery_requested = true;
     }
     if self.discovery_requested && self.stopping.is_none() && self.stream.is_none() {
-      self.begin_discovery(ctx);
+      self.begin_discovery();
     }
     if !wanted {
       if self.stream.is_some() {
         self.stop_stream();
-        self.texture = None;
+        self.set_image(None, window, cx);
       }
       return;
     }
     if self.stream.is_some() && self.running_device != self.settings.device {
       self.stop_stream();
       self.capture_failed = false;
-      self.texture = None;
+      self.set_image(None, window, cx);
     }
     if self.stream.as_ref().is_some_and(CameraStream::is_finished) {
       self.stop_stream();
       self.capture_failed = true;
-      self.texture = None;
+      self.set_image(None, window, cx);
     }
     if self.stream.as_ref().is_some_and(|stream| stream.startup_timed_out(CAMERA_STARTUP_TIMEOUT)) {
       let unavailable = self.running_device.take();
@@ -113,11 +164,11 @@ impl CameraController {
       self.devices.retain(|device| Some(device.id.as_str()) != unavailable.as_deref());
       self.settings.device = selected_available_device(None, &self.devices);
       self.capture_failed = self.settings.device.is_none();
-      self.texture = None;
+      self.set_image(None, window, cx);
     }
     self.poll_stopping();
     if self.stopping.is_some() && !self.stop_timed_out() {
-      ctx.request_repaint_after(std::time::Duration::from_millis(50));
+      self.poll_in(Duration::from_millis(50));
       return;
     }
     if self.stop_timed_out() {
@@ -127,7 +178,7 @@ impl CameraController {
     }
     if self.stream.is_none() {
       if self.devices.is_empty() || self.discovery.is_some() || self.discovery_requested {
-        ctx.request_repaint_after(std::time::Duration::from_millis(100));
+        self.poll_in(Duration::from_millis(100));
         return;
       }
       if self.capture_failed {
@@ -137,21 +188,16 @@ impl CameraController {
         return;
       };
       self.running_device = Some(device.clone());
-      self.stream = Some(CameraStream::start(Some(device), self.background.clone(), ctx.clone()));
+      self.stream = Some(CameraStream::start(Some(device), self.background.clone(), self.waker.clone()));
     }
     if let Some(frame) = self.stream.as_ref().and_then(|s| s.take_frame()) {
-      if frame.rgba.len() != frame.width as usize * frame.height as usize * 4 {
-        return;
-      }
-      let image = egui::ColorImage::from_rgba_unmultiplied([frame.width as usize, frame.height as usize], &frame.rgba);
-      match self.texture.as_mut() {
-        Some(tex) => tex.set(image, TextureOptions::LINEAR),
-        None => self.texture = Some(ctx.load_texture("camera", image, TextureOptions::LINEAR)),
+      if let Some(image) = frame_image(frame, self.settings.mirror) {
+        self.set_image(Some(image), window, cx);
       }
     } else if self.stream.is_some() {
       // A camera can enumerate and open but never deliver a frame (e.g. a closed-lid camera).
-      // Keep polling so the startup timeout runs even when the UI otherwise has no repaint work.
-      ctx.request_repaint_after(Duration::from_millis(100));
+      // Keep polling so the startup timeout runs even when the UI otherwise has no work.
+      self.poll_in(Duration::from_millis(100));
     }
   }
 
@@ -168,190 +214,203 @@ impl CameraController {
     self.stream.as_ref().and_then(|s| s.error()).or_else(|| self.last_error.clone())
   }
 
-  /// Draw the overlay inside `area` (the audience window's full rect).
-  pub fn draw_overlay(&self, ui: &egui::Ui, area: Rect) {
-    if !self.settings.enabled {
+  /// Paint the overlay inside `area` (the audience window's full rect).
+  pub fn paint_overlay(&self, area: Bounds<f32>, window: &mut Window) {
+    let (true, Some(image)) = (self.settings.enabled, self.image.as_ref()) else {
       return;
-    }
-    if let Some(tex) = self.texture.as_ref() {
-      self.paint(ui, tex, area, self.settings.size);
-    }
-  }
-
-  fn paint(&self, ui: &egui::Ui, tex: &TextureHandle, area: Rect, size: f32) {
+    };
     let s = &self.settings;
-    let [tw, th] = tex.size();
-    let frame_aspect = tw as f32 / th.max(1) as f32;
+    let frame = image.size(0);
+    let frame_aspect = frame.width.0 as f32 / frame.height.0.max(1) as f32;
     let shape = if s.background == BackgroundMode::Remove { CameraShape::Rect } else { s.shape };
     let circle = shape == CameraShape::Circle;
-    let aspect = if circle { 1.0 } else { frame_aspect };
-    let rect = place(area, s.corner, size, s.margin, aspect);
+    let rect = place(area, s.corner, s.size, s.margin, if circle { 1.0 } else { frame_aspect });
 
-    // UV: crop to a centred square for a circle; flip horizontally when mirrored.
-    let (mut u0, mut u1) = (0.0_f32, 1.0_f32);
-    if circle && frame_aspect > 1.0 {
-      let half = 0.5 / frame_aspect;
-      u0 = 0.5 - half;
-      u1 = 0.5 + half;
-    }
-    let (mut v0, mut v1) = (0.0_f32, 1.0_f32);
-    if circle && frame_aspect < 1.0 {
-      let half = 0.5 * frame_aspect;
-      v0 = 0.5 - half;
-      v1 = 0.5 + half;
-    }
-    if s.mirror {
-      std::mem::swap(&mut u0, &mut u1);
-    }
-    let uv = Rect::from_min_max(pos2(u0, v0), pos2(u1, v1));
-
+    // A circle shows the centred square of the frame.
+    let uv = if !circle {
+      Bounds::new(point(0.0, 0.0), size(1.0, 1.0))
+    } else if frame_aspect > 1.0 {
+      Bounds::centered_at(point(0.5, 0.5), size(1.0 / frame_aspect, 1.0))
+    } else {
+      Bounds::centered_at(point(0.5, 0.5), size(1.0, frame_aspect))
+    };
     let radius = match shape {
       CameraShape::Rect => 0.0,
-      CameraShape::Rounded => rect.height().min(rect.width()) * 0.12,
-      CameraShape::Circle => rect.width() / 2.0,
-    }
-    .min(255.0);
-    ui.painter()
-      .add(egui::epaint::RectShape::filled(rect, radius, Color32::WHITE).with_texture(tex.id(), uv));
+      CameraShape::Rounded => rect.size.height.min(rect.size.width) * 0.12,
+      CameraShape::Circle => rect.size.width / 2.0,
+    };
+    crate::app::paint_cropped(window, rect, uv, radius, image.clone());
   }
 
-  /// Settings controls. Returns true if anything changed (so the caller persists it).
-  pub fn settings_ui(&mut self, ui: &mut egui::Ui) -> bool {
-    let mut changed = false;
+  /// Settings controls, shown in the presenter's settings popover.
+  pub fn settings_ui(&mut self, cx: &mut Context<PresenterApp>) -> AnyElement {
     self.preview_seen = true;
-    self.poll_discovery(ui.ctx());
-    if self.settings.enabled && self.stream.is_none() {
-      ui.ctx().request_repaint(); // let `update` start the preview stream
-    }
     if self.settings.enabled && self.devices.is_empty() && self.discovery.is_none() && !self.discovery_done {
-      self.refresh_devices(ui.ctx());
+      self.refresh_devices();
     }
-    if ui.checkbox(&mut self.settings.enabled, "Camera (C)").changed() {
-      changed = true;
-      if self.settings.enabled {
-        if !self.permission_requested {
-          self.permission_requested = true;
-          request_permission();
-        }
-        self.refresh_devices(ui.ctx());
-      }
+    // The popover just opened: let `update` start the preview stream.
+    if self.settings.enabled && self.stream.is_none() && !self.preview_open {
+      self.waker.wake();
     }
+    let enabled = Checkbox::new("camera-enabled")
+      .label("Camera (C)")
+      .checked(self.settings.enabled)
+      .on_click(cx.listener(|app, checked: &bool, _, cx| {
+        app.camera.set_enabled(*checked);
+        app.dirty = true;
+        cx.notify();
+      }));
     if !self.settings.enabled {
-      return changed;
+      return v_flex().gap_2().child(enabled).into_any_element();
     }
-    // Inline list (a combo box's dropdown would count as a click outside the popover).
-    ui.horizontal(|ui| {
-      ui.label("Source");
-      if ui.small_button("⟳").on_hover_text("Rescan cameras").clicked() {
-        self.refresh_devices(ui.ctx());
-      }
-    });
+    let theme = cx.theme();
+    let (danger, warning, muted) = (theme.danger, theme.warning, theme.muted_foreground);
+    let note = |text: &str| div().text_sm().text_color(muted).child(text.to_owned());
+
+    let mut col = v_flex().gap_2().w(px(400.)).child(enabled).child(
+      h_flex().gap_2().child("Source").child(
+        Button::new("camera-rescan")
+          .icon(Icon::new(Lucide::RefreshCw))
+          .small()
+          .tooltip("Rescan cameras")
+          .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+            app.camera.refresh_devices();
+            cx.notify();
+          })),
+      ),
+    );
     if self.discovery.is_some() {
-      ui.small("Searching for available cameras…");
+      col = col.child(note("Searching for available cameras…"));
     } else if self.discovery_requested || self.stopping.is_some() {
-      ui.small("Updating camera list…");
+      col = col.child(note("Updating camera list…"));
     }
     let selected = self.settings.device.clone().or_else(|| self.devices.first().map(|d| d.id.clone()));
-    for d in &self.devices {
+    for (i, d) in self.devices.iter().enumerate() {
       let is_selected = selected.as_deref() == Some(d.id.as_str());
-      if ui.radio(is_selected, &d.name).clicked() && !is_selected {
-        self.settings.device = Some(d.id.clone());
-        self.last_error = None;
-        self.capture_failed = false;
-        self.running_device = None;
-        self.texture = None;
-        changed = true;
-      }
+      let id = d.id.clone();
+      col = col.child(
+        Radio::new(("camera-device", i))
+          .label(d.name.clone())
+          .checked(is_selected)
+          .on_click(cx.listener(move |app, _: &bool, window, cx| {
+            if app.camera.settings.device.as_deref() != Some(id.as_str()) {
+              let camera = &mut app.camera;
+              camera.settings.device = Some(id.clone());
+              camera.last_error = None;
+              camera.capture_failed = false;
+              camera.running_device = None;
+              camera.set_image(None, window, cx);
+              app.dirty = true;
+              cx.notify();
+            }
+          })),
+      );
     }
-    if self.settings.enabled && self.texture.is_none() {
+    if self.image.is_none() {
       if let Some(error) = self.error() {
-        ui.colored_label(Color32::LIGHT_RED, format!("Camera preview unavailable: {error}"));
+        col = col.child(div().text_color(danger).child(format!("Camera preview unavailable: {error}")));
       } else if self.discovery.is_some() || self.discovery_requested || self.stopping.is_some() {
-        ui.small("Preparing camera preview…");
+        col = col.child(note("Preparing camera preview…"));
       } else if !self.capture_failed {
-        ui.small("Starting camera preview…");
+        col = col.child(note("Starting camera preview…"));
       }
     }
 
-    ui.horizontal(|ui| {
-      ui.label("Corner");
-      for (corner, label) in [
-        (Corner::TopLeft, "↖"),
-        (Corner::TopRight, "↗"),
-        (Corner::BottomLeft, "↙"),
-        (Corner::BottomRight, "↘"),
-      ] {
-        changed |= ui.selectable_value(&mut self.settings.corner, corner, label).changed();
-      }
-    });
-    ui.horizontal(|ui| {
-      ui.label("Shape");
-      for (shape, label) in [(CameraShape::Rect, "Rect"), (CameraShape::Rounded, "Rounded"), (CameraShape::Circle, "Circle")] {
-        changed |= ui.selectable_value(&mut self.settings.shape, shape, label).changed();
-      }
-    });
-    changed |= ui.add(egui::Slider::new(&mut self.settings.size, 0.08..=0.5).text("Size")).changed();
-    changed |= ui.checkbox(&mut self.settings.mirror, "Mirror").changed();
-    ui.horizontal(|ui| {
-      ui.label("Background");
-      for (mode, label) in [
-        (BackgroundMode::Off, "Keep"),
-        (BackgroundMode::Remove, "Remove"),
-        (BackgroundMode::Blur, "Blur"),
-      ] {
-        changed |= ui.selectable_value(&mut self.settings.background, mode, label).changed();
-      }
-    });
+    let corners = [
+      (Corner::TopLeft, "↖"),
+      (Corner::TopRight, "↗"),
+      (Corner::BottomLeft, "↙"),
+      (Corner::BottomRight, "↘"),
+    ];
+    let shapes = [(CameraShape::Rect, "Rect"), (CameraShape::Rounded, "Rounded"), (CameraShape::Circle, "Circle")];
+    let backgrounds = [
+      (BackgroundMode::Off, "Keep"),
+      (BackgroundMode::Remove, "Remove"),
+      (BackgroundMode::Blur, "Blur"),
+    ];
+    col = col
+      .child(choice_row("Corner", &corners, self.settings.corner, cx, |s, v| s.corner = v))
+      .child(choice_row("Shape", &shapes, self.settings.shape, cx, |s, v| s.shape = v))
+      .child(h_flex().gap_2().child(Slider::new(&self.size_slider).flex_1()).child("Size"))
+      .child(
+        Checkbox::new("camera-mirror")
+          .label("Mirror")
+          .checked(self.settings.mirror)
+          .on_click(cx.listener(|app, checked: &bool, _, cx| {
+            app.camera.settings.mirror = *checked;
+            app.dirty = true;
+            cx.notify();
+          })),
+      )
+      .child(choice_row("Background", &backgrounds, self.settings.background, cx, |s, v| s.background = v));
 
     if let Some(err) = self.error() {
-      ui.colored_label(Color32::LIGHT_RED, format!("Camera error: {err}"));
-      if ui.button("Retry").clicked() {
-        self.refresh_devices(ui.ctx());
-        self.retry();
-      }
+      col = col
+        .child(div().text_color(danger).child(format!("Camera error: {err}")))
+        .child(
+          Button::new("camera-retry")
+            .label("Retry")
+            .small()
+            .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+              app.camera.refresh_devices();
+              app.camera.retry();
+              cx.notify();
+            })),
+        );
     } else if self.devices.is_empty() && self.discovery.is_none() {
-      ui.colored_label(Color32::YELLOW, "No available cameras (check access or connection)");
-    } else if self.settings.enabled && self.settings.device.is_none() {
-      ui.colored_label(Color32::LIGHT_RED, "No selected camera is available");
+      col = col.child(div().text_color(warning).child("No available cameras (check access or connection)"));
+    } else if self.settings.device.is_none() {
+      col = col.child(div().text_color(danger).child("No selected camera is available"));
     }
     if self.stopping.is_some() {
-      ui.small(if self.stop_timed_out() {
+      col = col.child(note(if self.stop_timed_out() {
         "Previous camera is unresponsive; continuing with the selected camera…"
       } else {
         "Waiting for the previous camera to stop…"
-      });
+      }));
     }
-    {
-      let lines = self.stream.as_ref().map(CameraStream::diagnostics).unwrap_or_else(|| self.diagnostics.clone());
-      if !lines.is_empty() {
-        ui.collapsing("Capture details", |ui| {
-          ui.set_max_width(320.0);
-          for line in lines {
-            ui.small(line);
-          }
-        });
+    let lines = self.stream.as_ref().map(CameraStream::diagnostics).unwrap_or_else(|| self.diagnostics.clone());
+    if !lines.is_empty() {
+      col = col.child(
+        Button::new("camera-details")
+          .icon(Icon::new(if self.show_details { Lucide::ChevronDown } else { Lucide::ChevronRight }))
+          .label("Capture details")
+          .ghost()
+          .on_click(cx.listener(|app, _: &ClickEvent, _, cx| {
+            app.camera.show_details = !app.camera.show_details;
+            cx.notify();
+          })),
+      );
+      if self.show_details {
+        col = col.children(lines.iter().map(|line| note(line)));
       }
     }
     // Small self-preview, so the presenter can check the framing.
-    if let Some(tex) = self.texture.as_ref() {
-      let [tw, th] = tex.size();
-      ui.small(format!("Capture: {tw}x{th}"));
-      let w = 200.0;
+    if let Some(image) = self.image.clone() {
+      let frame = image.size(0);
+      let (tw, th) = (frame.width.0, frame.height.0);
+      let w = 260.0;
       let h = w * th as f32 / tw.max(1) as f32;
-      let (rect, _) = ui.allocate_exact_size(egui::vec2(w, h), egui::Sense::hover());
-      let uv = if self.settings.mirror {
-        Rect::from_min_max(pos2(1.0, 0.0), pos2(0.0, 1.0))
-      } else {
-        Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0))
-      };
       // Dark backdrop so a removed background is visible as transparency.
-      ui.painter().rect_filled(rect, 0.0, Color32::from_gray(40));
-      ui.painter().image(tex.id(), rect, uv, Color32::WHITE);
+      col = col
+        .child(note(&format!("Capture: {tw}x{th}")))
+        .child(div().w(px(w)).h(px(h)).bg(rgb(0x282828)).child(img(image).size_full()));
     }
-    changed
+    col.into_any_element()
   }
 
-  fn refresh_devices(&mut self, ctx: &egui::Context) {
+  fn set_enabled(&mut self, enabled: bool) {
+    self.settings.enabled = enabled;
+    if enabled {
+      if !self.permission_requested {
+        self.permission_requested = true;
+        request_permission();
+      }
+      self.refresh_devices();
+    }
+  }
+
+  fn refresh_devices(&mut self) {
     if self.discovery.is_some() || self.discovery_requested {
       return;
     }
@@ -362,24 +421,24 @@ impl CameraController {
     }
     self.poll_stopping();
     if self.stopping.is_some() {
-      ctx.request_repaint_after(std::time::Duration::from_millis(50));
+      self.poll_in(Duration::from_millis(50));
       return;
     }
-    self.begin_discovery(ctx);
+    self.begin_discovery();
   }
 
-  fn begin_discovery(&mut self, ctx: &egui::Context) {
+  fn begin_discovery(&mut self) {
     if self.discovery.is_some() || self.stream.is_some() || self.stopping.is_some() {
       return;
     }
     let (tx, rx) = mpsc::sync_channel(1);
     self.discovery = Some(rx);
     self.discovery_requested = false;
-    let ctx = ctx.clone();
+    let waker = self.waker.clone();
     let spawn = std::thread::Builder::new().name("camera-discovery".into()).spawn(move || {
       let result = list_available_cameras();
       let _ = tx.send(result);
-      ctx.request_repaint();
+      waker.wake();
     });
     if let Err(error) = spawn {
       self.discovery = None;
@@ -389,7 +448,7 @@ impl CameraController {
     }
   }
 
-  fn poll_discovery(&mut self, ctx: &egui::Context) {
+  fn poll_discovery(&mut self) {
     let Some(receiver) = self.discovery.as_ref() else { return };
     match receiver.try_recv() {
       Ok(Ok(devices)) => {
@@ -397,20 +456,18 @@ impl CameraController {
         self.discovery_done = true;
         self.discovery = None;
         self.settings.device = selected_available_device(self.settings.device.as_deref(), &self.devices);
-        ctx.request_repaint();
       }
       Ok(Err(error)) => {
         self.last_error = Some(format!("camera discovery failed: {error:#}"));
         self.discovery_done = true;
         self.discovery = None;
-        ctx.request_repaint();
       }
       Err(mpsc::TryRecvError::Disconnected) => {
         self.last_error = Some("camera discovery worker stopped unexpectedly".to_owned());
         self.discovery_done = true;
         self.discovery = None;
       }
-      Err(mpsc::TryRecvError::Empty) => ctx.request_repaint_after(std::time::Duration::from_millis(100)),
+      Err(mpsc::TryRecvError::Empty) => self.poll_in(Duration::from_millis(100)),
     }
   }
 
@@ -421,7 +478,7 @@ impl CameraController {
       }
       self.diagnostics = stream.diagnostics();
       self.stopping = Some(stream.stop());
-      self.stopping_since = Some(std::time::Instant::now());
+      self.stopping_since = Some(Instant::now());
     }
   }
 
@@ -436,6 +493,30 @@ impl CameraController {
   fn stop_timed_out(&self) -> bool {
     self.stopping_since.is_some_and(|since| since.elapsed() >= CAMERA_STOP_TIMEOUT)
   }
+}
+
+/// A label and a row of buttons, one selected, that set one camera setting.
+fn choice_row<T: Copy + PartialEq + 'static>(
+  label: &'static str,
+  choices: &[(T, &'static str)],
+  current: T,
+  cx: &mut Context<PresenterApp>,
+  set: fn(&mut CameraSettings, T),
+) -> impl IntoElement {
+  h_flex()
+    .gap_1()
+    .child(div().mr_1().child(label))
+    .children(choices.iter().enumerate().map(|(i, &(value, text))| {
+      Button::new((label, i))
+        .label(text)
+        .small()
+        .selected(value == current)
+        .on_click(cx.listener(move |app, _: &ClickEvent, _, cx| {
+          set(&mut app.camera.settings, value);
+          app.dirty = true;
+          cx.notify();
+        }))
+    }))
 }
 
 #[cfg(test)]

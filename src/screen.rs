@@ -1,82 +1,35 @@
-//! Monitor geometry helpers (in logical points), via `display-info`.
-//!
-//! macOS reports monitor bounds already in logical points; other platforms report
-//! physical pixels, which we convert using each monitor's scale factor.
+//! Which monitor the presenter and the audience windows belong on, from GPUI's displays.
 
-use display_info::DisplayInfo;
+use std::rc::Rc;
 
-#[derive(Clone, Copy, Debug)]
-pub struct MonitorRect {
-  pub x: f32,
-  pub y: f32,
-  pub w: f32,
-  pub h: f32,
-  /// The monitor's scale factor (device pixels per logical point).
-  pub scale: f32,
+use gpui_kit::{App, PlatformDisplay};
+
+pub type Monitor = Rc<dyn PlatformDisplay>;
+
+/// The primary monitor (where the presenter window belongs).
+pub fn primary(cx: &App) -> Option<Monitor> {
+  cx.primary_display().or_else(|| cx.displays().into_iter().next())
 }
 
-impl MonitorRect {
-  /// Whether a point (logical) lies within this monitor.
-  pub fn contains(&self, x: f32, y: f32) -> bool {
-    x >= self.x - 1.0 && x < self.x + self.w && y >= self.y - 1.0 && y < self.y + self.h
-  }
-}
-
-fn to_logical(d: &DisplayInfo) -> MonitorRect {
-  let s = if d.scale_factor > 0.0 { d.scale_factor } else { 1.0 };
-  if cfg!(target_os = "macos") {
-    MonitorRect {
-      x: d.x as f32,
-      y: d.y as f32,
-      w: d.width as f32,
-      h: d.height as f32,
-      scale: s,
-    }
-  } else {
-    MonitorRect {
-      x: d.x as f32 / s,
-      y: d.y as f32 / s,
-      w: d.width as f32 / s,
-      h: d.height as f32 / s,
-      scale: s,
-    }
-  }
-}
-
-/// The primary monitor's rectangle (where the presenter window belongs).
-pub fn primary() -> Option<MonitorRect> {
-  let displays = DisplayInfo::all().ok()?;
-  displays.iter().find(|d| d.is_primary).or_else(|| displays.first()).map(to_logical)
-}
-
-/// A secondary (non-primary) monitor's rectangle, if one is attached.
-pub fn external() -> Option<MonitorRect> {
-  let displays = DisplayInfo::all().ok()?;
-  let ext = displays.into_iter().find(|d| !d.is_primary)?;
-  Some(to_logical(&ext))
-}
-
-/// The top-left of a secondary monitor, if one is attached (where the audience
-/// window belongs).
-pub fn external_origin() -> Option<[f32; 2]> {
-  external().map(|r| [r.x, r.y])
+/// A secondary (non-primary) monitor, if one is attached (where the audience window belongs).
+pub fn external(cx: &App) -> Option<Monitor> {
+  let primary = primary(cx).map(|d| d.id());
+  cx.displays().into_iter().find(|d| Some(d.id()) != primary)
 }
 
 /// The monitor the audience window should occupy. With two screens it is the external one
 /// (or the primary when `swapped`); with a single screen it is the primary.
-pub fn audience_monitor(swapped: bool) -> Option<MonitorRect> {
-  match (primary(), external()) {
+pub fn audience_monitor(swapped: bool, cx: &App) -> Option<Monitor> {
+  match (primary(cx), external(cx)) {
     (Some(p), Some(e)) => Some(if swapped { p } else { e }),
-    (p, None) => p,
-    (None, Some(e)) => Some(e),
+    (p, e) => p.or(e),
   }
 }
 
 /// The monitor the presenter window should occupy (the one the audience is not on).
-pub fn presenter_monitor(swapped: bool) -> Option<MonitorRect> {
-  match (primary(), external()) {
+pub fn presenter_monitor(swapped: bool, cx: &App) -> Option<Monitor> {
+  match (primary(cx), external(cx)) {
     (Some(p), Some(e)) => Some(if swapped { e } else { p }),
-    (p, None) => p,
-    (None, Some(e)) => Some(e),
+    (p, e) => p.or(e),
   }
 }

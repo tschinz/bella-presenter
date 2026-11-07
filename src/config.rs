@@ -2,10 +2,9 @@
 //!
 //! We deliberately use `~/.config/bella-presenter` on both macOS and Linux (rather than
 //! macOS's `~/Library/Application Support`), and `%APPDATA%\bella-presenter` on Windows.
-//! We manage this file ourselves (rather than via eframe storage) so it always lives
-//! at this location and is written promptly.
+//! We manage this file ourselves so it always lives at this location and is written promptly.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -58,7 +57,7 @@ pub struct Geometry {
   pub h: f32,
 }
 
-/// UI theme preference, persisted and mapped to egui's `ThemePreference`.
+/// UI theme preference, persisted and applied to the component theme.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Theme {
   #[default]
@@ -162,8 +161,6 @@ pub struct State {
   pub footer_font: f32,
   pub pointer_size: f32,
   pub layout_index: usize,
-  pub audience_fullscreen: bool,
-  pub audience_geometry: Option<Geometry>,
   pub window_geometry: Option<Geometry>,
   pub recent: Vec<RecentEntry>,
   pub show_thumbnails: bool,
@@ -181,11 +178,9 @@ pub struct State {
 impl Default for State {
   fn default() -> Self {
     Self {
-      footer_font: 24.0,
+      footer_font: 32.0,
       pointer_size: 1.0,
       layout_index: 0,
-      audience_fullscreen: true,
-      audience_geometry: None,
       window_geometry: None,
       recent: Vec::new(),
       show_thumbnails: true,
@@ -230,26 +225,6 @@ impl State {
         }
       }
       Err(e) => tracing::warn!("could not serialize state: {e}"),
-    }
-  }
-
-  /// Move `path` to the front of the recent list, keeping its last page.
-  pub fn record_recent(&mut self, path: &Path, page: usize, max: usize) {
-    let path = path.to_path_buf();
-    self.recent.retain(|e| e.path != path);
-    self.recent.insert(0, RecentEntry { path, page });
-    self.recent.truncate(max);
-  }
-
-  /// The last page viewed in `path`, if known.
-  pub fn last_page(&self, path: &Path) -> Option<usize> {
-    self.recent.iter().find(|e| e.path == path).map(|e| e.page)
-  }
-
-  /// Update the stored page for `path` if it is in the recent list.
-  pub fn set_page(&mut self, path: &Path, page: usize) {
-    if let Some(e) = self.recent.iter_mut().find(|e| e.path == path) {
-      e.page = page;
     }
   }
 }
