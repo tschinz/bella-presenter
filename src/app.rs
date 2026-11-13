@@ -104,6 +104,10 @@ struct Stroke {
   width_factor: f32,
 }
 
+/// Freehand line width, as a fraction of the slide height (times the pointer size).
+const STROKE_WIDTH: f32 = 0.006;
+/// Eraser radius in the same unit: a circle twice as wide as a line.
+const ERASER_RADIUS: f32 = 2.0 * STROKE_WIDTH;
 const MIN_FOOTER_FONT: f32 = 12.0;
 const MAX_FOOTER_FONT: f32 = 72.0;
 const MIN_POINTER_SIZE: f32 = 0.25;
@@ -189,6 +193,9 @@ pub struct PresenterApp {
   strokes: HashMap<usize, Vec<Stroke>>,
   /// Whether a stroke is currently being drawn.
   drawing: bool,
+  /// Whether the right button is held to erase (draw mode), and where the eraser is.
+  erasing: bool,
+  eraser_norm: Option<Point<f32>>,
   /// The slide surface the left mouse button was pressed on, while it is held.
   pressed: Option<Surface>,
   /// Each page's slide links (looked up once), the surface with a link under the mouse, and where
@@ -375,6 +382,8 @@ impl PresenterApp {
       pointer_norm: None,
       strokes: HashMap::new(),
       drawing: false,
+      erasing: false,
+      eraser_norm: None,
       pressed: None,
       drag_last: None,
       links: HashMap::new(),
@@ -1669,13 +1678,23 @@ impl PresenterApp {
     let page = if board { BOARD } else { page };
     self.listen_to_slide(surface, page, hitbox, rect, uv, window, cx);
     // The page's strokes, then the pointer dot (if any) on top, clipped to the slide.
-    let color = self.pointer_color;
+    let ink = self.pointer_color;
     window.with_content_mask(Some(ContentMask { bounds: rect.map(px) }), |window| {
       for s in self.strokes.get(&page).into_iter().flatten() {
-        paint_stroke(window, rect, uv, s, color);
+        paint_stroke(window, rect, uv, s, ink);
       }
       if let Some(n) = self.pointer_norm {
-        paint_pointer_dot(window, rect, uv, n, self.pointer_size, color);
+        paint_pointer_dot(window, rect, uv, n, self.pointer_size, ink);
+      }
+      if let Some(n) = self.eraser_norm {
+        let r = ERASER_RADIUS * self.pointer_size * rect.size.height / uv.size.height.max(1e-6);
+        paint_circle(
+          window,
+          slide_to_screen(rect, uv, n),
+          r,
+          color([255, 90, 90], 60),
+          Some(color([255, 90, 90], 110)),
+        );
       }
     });
   }
@@ -1691,8 +1710,14 @@ impl PresenterApp {
       let (app, hitbox) = (app.clone(), hitbox.clone());
       move |e: &MouseDownEvent, phase, window, cx| {
         let pos = to_f32(e.position);
-        if phase == DispatchPhase::Bubble && e.button == MouseButton::Left && hitbox.is_hovered(window) && rect.contains(&pos) {
+        let (left, right) = (e.button == MouseButton::Left, e.button == MouseButton::Right);
+        if phase == DispatchPhase::Bubble && (left || right) && hitbox.is_hovered(window) && rect.contains(&pos) {
           let _ = app.update(cx, |app, cx| {
+            // The right button erases, in draw mode only.
+            if right && (app.mode != InputMode::Draw || app.pressed.is_some()) {
+              return;
+            }
+            app.erasing = right;
             app.pressed = Some(surface);
             app.press_start = Some((pos, Instant::now()));
             app.drag_last = None;
@@ -1721,7 +1746,8 @@ impl PresenterApp {
               return;
             }
             // A release outside the window never arrives as a mouse-up: the button is up by now.
-            if e.pressed_button == Some(MouseButton::Left) {
+            let held = if app.erasing { MouseButton::Right } else { MouseButton::Left };
+            if e.pressed_button == Some(held) {
               app.slide_input(to_f32(e.position), e.modifiers, rect, uv);
             } else {
               app.release(surface);
@@ -1732,9 +1758,10 @@ impl PresenterApp {
       }
     });
     window.on_mouse_event(move |e: &MouseUpEvent, phase, _, cx| {
-      if phase == DispatchPhase::Bubble && e.button == MouseButton::Left {
+      if phase == DispatchPhase::Bubble && matches!(e.button, MouseButton::Left | MouseButton::Right) {
         let _ = app.update(cx, |app, cx| {
-          if app.pressed != Some(surface) {
+          let held = if app.erasing { MouseButton::Right } else { MouseButton::Left };
+          if app.pressed != Some(surface) || e.button != held {
             return;
           }
           let pos = to_f32(e.position);
@@ -1748,6 +1775,12 @@ impl PresenterApp {
             && !crate::platform::zoom_modifier(e.modifiers)
             && let Some(target) = app.link_at(page, screen_to_slide(rect, uv, pos))
           {
+            // In draw mode the press began a dot, but the click was meant for the link.
+            if app.mode == InputMode::Draw
+              && let Some(strokes) = app.strokes.get_mut(&page)
+            {
+              strokes.pop();
+            }
             app.follow(target, cx);
           }
           cx.notify();
@@ -1775,12 +1808,6 @@ impl PresenterApp {
   /// Queue a picture to render once the current frame is on screen.
   fn want_prefetch(&mut self, item: (usize, Region, [u32; 2]), cx: &mut Context<Self>) {
     if !self.prefetch.contains(&item) {
-            // In draw mode the press began a dot, but the click was meant for the link.
-            if app.mode == InputMode::Draw
-              && let Some(strokes) = app.strokes.get_mut(&page)
-            {
-              strokes.pop();
-            }
       self.prefetch.push(item);
     }
     if self.prefetch_task.is_some() {
@@ -1816,12 +1843,14 @@ impl PresenterApp {
     !self.prefetch.is_empty()
   }
 
-  /// The left button let go of `surface`: hide the pointer and end the stroke.
+  /// The held button let go of `surface`: hide the pointer or eraser and end the stroke.
   fn release(&mut self, surface: Surface) {
     if self.pressed == Some(surface) {
       self.pressed = None;
       self.pointer_norm = None;
       self.drawing = false;
+      self.erasing = false;
+      self.eraser_norm = None;
     }
   }
 
@@ -1830,6 +1859,7 @@ impl PresenterApp {
     if crate::platform::zoom_modifier(modifiers) {
       // Ctrl/Cmd/Option+drag pans (when zoomed); no pointer/drawing meanwhile.
       self.pointer_norm = None;
+      self.eraser_norm = None;
       self.drawing = false;
       if let Some(last) = self.drag_last
         && self.zoom > 1.0
@@ -1846,9 +1876,17 @@ impl PresenterApp {
           self.drawing = false;
           self.pointer_norm = Some(n);
         }
+        InputMode::Draw if self.erasing => {
+          self.eraser_norm = Some(n);
+          let r = ERASER_RADIUS * self.pointer_size * rect.size.height / uv.size.height.max(1e-6);
+          let ink = self.ink_page();
+          if let Some(strokes) = self.strokes.get_mut(&ink) {
+            erase(strokes, pos, r, |p| slide_to_screen(rect, uv, p));
+          }
+        }
         InputMode::Draw => {
           self.pointer_norm = None;
-          let (width_factor, min_step) = (0.006 * self.pointer_size, 0.0015 / self.zoom);
+          let (width_factor, min_step) = (STROKE_WIDTH * self.pointer_size, 0.0015 / self.zoom);
           let strokes = self.strokes.entry(self.ink_page()).or_default();
           if !self.drawing {
             self.drawing = true;
@@ -1955,6 +1993,8 @@ impl PresenterApp {
       ("Hold mouse on current slide", "Laser pointer / draw (on the audience screen)"),
       ("P", "Toggle laser pointer / drawing"),
       ("D", "Delete the drawings on this slide"),
+      ("Left-drag (drawing)", "Draw on the slide"),
+      ("Right-drag (drawing)", "Erase part of a drawing"),
       (crate::platform::ZOOM_SCROLL, "Zoom the current slide at the cursor"),
       (crate::platform::ZOOM_DRAG, "Pan the zoomed slide"),
       ("Scroll", "Next / previous slide"),
@@ -2500,9 +2540,62 @@ impl TextureCache {
   }
 }
 
+/// Remove the parts of `strokes` within `r` of `at`, measured on screen (`to_screen` maps a slide
+/// point there). A stroke cut through the middle goes on as two strokes; leftover dots are dropped.
+fn erase(strokes: &mut Vec<Stroke>, at: Point<f32>, r: f32, to_screen: impl Fn(Point<f32>) -> Point<f32>) {
+  for stroke in std::mem::take(strokes) {
+    let screen: Vec<_> = stroke.points.iter().map(|p| to_screen(*p)).collect();
+    let mut runs = vec![Vec::new()];
+    for (i, (&p, &q)) in stroke.points.iter().zip(&screen).enumerate() {
+      if (q.x - at.x).hypot(q.y - at.y) <= r {
+        runs.push(Vec::new());
+        continue;
+      }
+      // The eraser can sit between two far-apart points of a fast line.
+      if i > 0 && distance_to_segment(at, screen[i - 1], q) <= r {
+        runs.push(Vec::new());
+      }
+      runs.last_mut().expect("starts with one run").push(p);
+    }
+    if runs.len() == 1 {
+      strokes.push(stroke);
+    } else {
+      let width_factor = stroke.width_factor;
+      strokes.extend(runs.into_iter().filter(|run| run.len() > 1).map(|points| Stroke { points, width_factor }));
+    }
+  }
+}
+
+fn distance_to_segment(p: Point<f32>, a: Point<f32>, b: Point<f32>) -> f32 {
+  let (dx, dy) = (b.x - a.x, b.y - a.y);
+  let len2 = dx * dx + dy * dy;
+  let t = if len2 > 0.0 {
+    (((p.x - a.x) * dx + (p.y - a.y) * dy) / len2).clamp(0.0, 1.0)
+  } else {
+    0.0
+  };
+  (p.x - a.x - t * dx).hypot(p.y - a.y - t * dy)
+}
+
 #[cfg(test)]
 mod tests {
   use super::*;
+
+  #[test]
+  fn erasing_cuts_strokes_and_drops_what_is_left_as_dots() {
+    let line = |points: &[(f32, f32)]| Stroke {
+      points: points.iter().map(|&(x, y)| point(x, y)).collect(),
+      width_factor: 1.0,
+    };
+    let row: Vec<(f32, f32)> = (0..10).map(|x| (x as f32, 0.0)).collect();
+    let mut strokes = vec![line(&row), line(&[(0.0, 5.0), (9.0, 5.0)]), line(&[(5.0, 9.0)])];
+    erase(&mut strokes, point(5.0, 0.0), 1.5, |p| p);
+    let xs: Vec<Vec<f32>> = strokes.iter().map(|s| s.points.iter().map(|p| p.x).collect()).collect();
+    assert_eq!(xs, [vec![0.0, 1.0, 2.0, 3.0], vec![7.0, 8.0, 9.0], vec![0.0, 9.0], vec![5.0]]);
+    // Between the two points of a long segment: nothing of it is left.
+    erase(&mut strokes, point(4.5, 5.0), 1.0, |p| p);
+    assert_eq!(strokes.len(), 3);
+  }
 
   fn wide_area() -> Bounds<f32> {
     Bounds::new(point(0.0, 0.0), size(1600.0, 900.0))
