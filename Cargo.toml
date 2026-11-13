@@ -50,7 +50,8 @@ rfd = "0.15"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 notify = "8.2.0"
 nokhwa = { version = "0.10.11", features = ["input-native"] }
-ort = "2.0.0-rc.13"
+# No "copy-dylibs": its build step fails on a fresh Windows build, and no copied library is shipped.
+ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "tls-native", "api-27"] }
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering
