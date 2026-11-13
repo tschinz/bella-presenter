@@ -1483,6 +1483,9 @@ impl PresenterApp {
     let (vw, vh) = (viewport.width, viewport.height);
     let has_notes = self.document.as_ref().is_some_and(Document::has_notes);
     let mut pane = |kind| resizable_panel().child(self.pane(kind, cx));
+    // A nested group's own `.size()` pins its cross axis (a column's width, a row's height), so
+    // it could shrink but never grow past it: the panel holding it carries the initial size.
+    let side = |size, group| resizable_panel().size(size).child(group);
     if !has_notes {
       return if self.layout_index.is_multiple_of(2) {
         h_resizable("nn-h")
@@ -1499,11 +1502,11 @@ impl PresenterApp {
     match self.layout_index % NUM_LAYOUTS {
       0 => h_resizable("l0")
         .child(pane(PaneKind::Current))
-        .child(v_resizable("l0-side").size(vw * 0.34).child(pane(PaneKind::Next)).child(pane(PaneKind::Notes)))
+        .child(side(vw * 0.34, v_resizable("l0-side").child(pane(PaneKind::Next)).child(pane(PaneKind::Notes))))
         .into_any_element(),
       1 => h_resizable("l1")
         .child(pane(PaneKind::Current))
-        .child(v_resizable("l1-side").size(vw * 0.34).child(pane(PaneKind::Notes)).child(pane(PaneKind::Next)))
+        .child(side(vw * 0.34, v_resizable("l1-side").child(pane(PaneKind::Notes)).child(pane(PaneKind::Next))))
         .into_any_element(),
       2 => h_resizable("l2")
         .child(pane(PaneKind::Next).size(vw * 0.24))
@@ -1512,7 +1515,7 @@ impl PresenterApp {
         .into_any_element(),
       _ => v_resizable("l3")
         .child(pane(PaneKind::Current))
-        .child(h_resizable("l3-row").size(vh * 0.32).child(pane(PaneKind::Next)).child(pane(PaneKind::Notes)))
+        .child(side(vh * 0.32, h_resizable("l3-row").child(pane(PaneKind::Next)).child(pane(PaneKind::Notes))))
         .into_any_element(),
     }
   }
