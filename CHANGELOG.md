@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.1] - 2026-11-13
+
+### 🚀 Features
+
+- *(drawing)* Follow links on a click in drawing mode ([c909f76](https://github.com/tschinz/bella-presenter/commit/c909f76e80f7579a6844e544288c39b3bfd02ecc) - zas)
+- *(drawing)* Erase with the right mouse button ([a2393d9](https://github.com/tschinz/bella-presenter/commit/a2393d93d406d2a565a0336479d79fe7631da79f) - zas)
+
+### 🐛 Bug Fixes
+
+- *(build)* Build ort without copy-dylibs so fresh windows builds pass ([a9b3737](https://github.com/tschinz/bella-presenter/commit/a9b3737c5f72c58b013852da647b5cb5a38d4149) - zas)
+
+### 🎨 Styling
+
+- *(ui)* Use smaller text in the shortcut card ([cf2567d](https://github.com/tschinz/bella-presenter/commit/cf2567d93e9ad2b6e776a4868f9c4e5faa90fcd8) - zas)
+
+
+**Full Changelog**: [v0.6.0...v0.6.1](https://github.com/tschinz/bella-presenter/compare/v0.6.0...v0.6.1)
+
 ## [0.6.0] - 2026-11-13
 
 ### 🚀 Features
