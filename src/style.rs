@@ -128,6 +128,7 @@ gpui_kit::assets::icon_assets!(
     Pencil,
     MousePointer,
     Eraser,
+    Presentation,
     Laptop,
     Keyboard,
     Clock,

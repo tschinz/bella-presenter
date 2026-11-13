@@ -75,6 +75,19 @@ enum Surface {
   Thumb,
 }
 
+/// What the audience sees in place of the current slide.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Cover {
+  Off,
+  /// Solid black (the presenter keeps seeing the slide).
+  Black,
+  /// A white page to draw on, shown on both screens.
+  White,
+}
+
+/// The `strokes` key of the whiteboard (no PDF page has this number).
+const BOARD: usize = usize::MAX;
+
 /// What holding the mouse over the current slide does.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum InputMode {
@@ -141,8 +154,8 @@ pub struct PresenterApp {
   theme: config::Theme,
   layout_index: usize,
   presenting: bool,
-  /// When true, the audience window shows solid black instead of the slide.
-  blanked: bool,
+  /// Black screen or whiteboard instead of the slide (B / ,).
+  cover: Cover,
   pub(crate) camera: CameraController,
   window_geometry: Option<Geometry>,
   recent: Vec<config::RecentEntry>,
@@ -342,7 +355,7 @@ impl PresenterApp {
       theme: st.theme,
       layout_index: st.layout_index % NUM_LAYOUTS,
       presenting: false,
-      blanked: false,
+      cover: Cover::Off,
       camera,
       window_geometry: st.window_geometry,
       recent,
@@ -426,7 +439,7 @@ impl PresenterApp {
           self.session.goto(page as isize);
         }
         self.document = Some(doc);
-        self.blanked = false;
+        self.cover = Cover::Off;
         self.reset_view();
         self.reload_due = None;
         self.error = None;
@@ -550,10 +563,26 @@ impl PresenterApp {
     self.pointer_norm = None;
   }
 
-  /// Remove all freehand drawings.
+  /// Remove the freehand drawings on the current slide (or the whiteboard).
   fn clear_drawings(&mut self) {
-    self.strokes.clear();
+    let ink = self.ink_page();
+    self.strokes.remove(&ink);
     self.drawing = false;
+  }
+
+  /// Where drawings go now: the whiteboard while it is up, else the current page.
+  fn ink_page(&self) -> usize {
+    if self.cover == Cover::White { BOARD } else { self.session.current() }
+  }
+
+  /// Turn `cover` on, or off again if it is already up. The whiteboard starts in draw mode.
+  fn toggle_cover(&mut self, cover: Cover) {
+    self.cover = if self.cover == cover { Cover::Off } else { cover };
+    self.drawing = false;
+    if self.cover == Cover::White {
+      self.mode = InputMode::Draw;
+      self.pointer_norm = None;
+    }
   }
 
   fn toggle_thumbnails(&mut self) {
@@ -728,7 +757,7 @@ impl PresenterApp {
     self.save_now(); // persist last page before closing
     self.stop_presentation(cx);
     self.document = None;
-    self.blanked = false;
+    self.cover = Cover::Off;
     self.mode = InputMode::Pointer;
     self.session = Session::new(0);
     self.reset_view();
@@ -886,7 +915,8 @@ impl PresenterApp {
         self.stop_presentation(cx);
         return;
       }
-      "b" => self.blanked = !self.blanked,
+      "b" => self.toggle_cover(Cover::Black),
+      "," => self.toggle_cover(Cover::White),
       "c" => self.toggle_camera(),
       "p" => self.toggle_mode(),
       "d" => self.clear_drawings(),
@@ -1095,14 +1125,27 @@ impl PresenterApp {
           button(
             "blank",
             Lucide::Square,
-            if self.blanked {
+            if self.cover == Cover::Black {
               "Show the slide again (B)"
             } else {
               "Blank the audience screen (B)"
             },
-            |app, _| app.blanked = !app.blanked,
+            |app, _| app.toggle_cover(Cover::Black),
           )
-          .selected(self.blanked),
+          .selected(self.cover == Cover::Black),
+        )
+        .child(
+          button(
+            "board",
+            Lucide::Presentation,
+            if self.cover == Cover::White {
+              "Show the slide again (,)"
+            } else {
+              "Show a whiteboard to draw on (,)"
+            },
+            |app, _| app.toggle_cover(Cover::White),
+          )
+          .selected(self.cover == Cover::White),
         )
         .child(button(
           "swap",
@@ -1135,7 +1178,9 @@ impl PresenterApp {
               .tooltip(|window, cx| Tooltip::new("Pointer & drawing colour").build(window, cx))
               .child(ColorPicker::new(&self.color_picker).xsmall()),
           )
-          .child(button("clear", Lucide::Eraser, "Delete all drawings (D)", |app, _| app.clear_drawings()));
+          .child(button("clear", Lucide::Eraser, "Delete the drawings on this slide (D)", |app, _| {
+            app.clear_drawings()
+          }));
       }
     }
 
@@ -1596,8 +1641,12 @@ impl PresenterApp {
     // Rendered at extra resolution when zoomed, for crispness.
     let scale = window.scale_factor();
     let px_size = render_size(view.fit, scale * zoom.clamp(1.0, MAX_ZOOM_RENDER));
+    // The whiteboard replaces the current slide on both screens, with its own drawings.
+    let board = current && self.cover == Cover::White;
     let cache = if surface == Surface::Thumb { &mut self.thumb_cache } else { &mut self.cache };
-    if let Some(image) = cache.get_or_render(doc, page, region, px_size) {
+    if board {
+      window.paint_quad(gpui_kit::fill(rect.map(px), rgb(0xffffff)));
+    } else if let Some(image) = cache.get_or_render(doc, page, region, px_size) {
       paint_cropped(window, rect, uv, 0.0, image);
     }
     // Get the following page ready at this size (unzoomed), so moving forward shows it at once.
@@ -1617,6 +1666,7 @@ impl PresenterApp {
     if self.link_hover == Some(surface) {
       window.set_cursor_style(CursorStyle::PointingHand, &hitbox);
     }
+    let page = if board { BOARD } else { page };
     self.listen_to_slide(surface, page, hitbox, rect, uv, window, cx);
     // The page's strokes, then the pointer dot (if any) on top, clipped to the slide.
     let color = self.pointer_color;
@@ -1711,7 +1761,7 @@ impl PresenterApp {
 
   /// Where the link at slide point `n` of `page` leads, if one is there.
   fn link_at(&mut self, page: usize, n: Point<f32>) -> Option<LinkTarget> {
-    let doc = self.document.as_ref()?;
+    let doc = self.document.as_ref().filter(|doc| page < doc.page_count())?;
     let links = self.links.entry(page).or_insert_with(|| Rc::new(doc.slide_links(page)));
     links.iter().find(|link| link.area.contains(n.x, n.y)).map(|link| link.target.clone())
   }
@@ -1796,7 +1846,7 @@ impl PresenterApp {
         InputMode::Draw => {
           self.pointer_norm = None;
           let (width_factor, min_step) = (0.006 * self.pointer_size, 0.0015 / self.zoom);
-          let strokes = self.strokes.entry(self.session.current()).or_default();
+          let strokes = self.strokes.entry(self.ink_page()).or_default();
           if !self.drawing {
             self.drawing = true;
             strokes.push(Stroke { points: vec![n], width_factor });
@@ -1811,14 +1861,14 @@ impl PresenterApp {
     self.drag_last = Some(pos);
   }
 
-  /// The audience window: only the slide, on black (or black alone while blanked).
+  /// The audience window: only the slide (or the whiteboard), on black (or black alone while blanked).
   /// Double-click toggles fullscreen.
   fn render_audience(&mut self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
     self.tick(window, cx);
     let slide = self
       .document
       .as_ref()
-      .filter(|_| !self.blanked)
+      .filter(|_| self.cover != Cover::Black)
       .map(|doc| (self.session.current(), doc.slide_aspect(self.session.current())));
     div()
       .size_full()
@@ -1887,6 +1937,7 @@ impl PresenterApp {
       ("F5", "Start presentation"),
       ("Esc", "Quit presentation"),
       ("B", "Blank the audience screen (black)"),
+      (",", "Whiteboard to draw on (both screens)"),
       ("C", "Toggle the webcam overlay"),
       ("W", "Close file, back to start screen"),
       ("R", "Reset the talk timer"),
@@ -1900,7 +1951,7 @@ impl PresenterApp {
       ("O", "Open a PDF"),
       ("Hold mouse on current slide", "Laser pointer / draw (on the audience screen)"),
       ("P", "Toggle laser pointer / drawing"),
-      ("D", "Delete all drawings"),
+      ("D", "Delete the drawings on this slide"),
       (crate::platform::ZOOM_SCROLL, "Zoom the current slide at the cursor"),
       (crate::platform::ZOOM_DRAG, "Pan the zoomed slide"),
       ("Scroll", "Next / previous slide"),
