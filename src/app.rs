@@ -1960,10 +1960,10 @@ impl PresenterApp {
       ("Scroll", "Next / previous slide"),
       ("(audience) double-click", "Toggle fullscreen"),
     ];
-    let body = v_flex().gap(px(6.0)).children(
+    let body = v_flex().gap(px(3.0)).text_sm().children(
       rows
         .into_iter()
-        .map(|(k, d)| h_flex().gap(px(24.0)).child(div().w(px(300.0)).font_weight(FontWeight::BOLD).child(k)).child(d)),
+        .map(|(k, d)| h_flex().gap(px(20.0)).child(div().w(px(240.0)).font_weight(FontWeight::BOLD).child(k)).child(d)),
     );
     self.card("shortcuts", "Keyboard shortcuts", Some(|app| app.show_shortcuts = false), body, cx)
   }
