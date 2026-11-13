@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - 2026-11-13
+
+### 🚀 Features
+
+- *(drawing)* Add a whiteboard and let d clear only the current slide ([d6d3b2d](https://github.com/tschinz/bella-presenter/commit/d6d3b2da4a33116107e0aa1a679ffd15def95bda) - zas)
+
+### 🐛 Bug Fixes
+
+- *(layout)* Let next and notes panes grow past their initial size ([e20ca32](https://github.com/tschinz/bella-presenter/commit/e20ca32fbb3cd97f8deb8bbbffdd3cd4eccc1f3c) - zas)
+
+
+**Full Changelog**: [v0.5.1...v0.6.0](https://github.com/tschinz/bella-presenter/compare/v0.5.1...v0.6.0)
+
 ## [0.5.1] - 2026-11-07
 
 ### 🚀 Features
