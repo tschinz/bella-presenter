@@ -1708,12 +1708,9 @@ impl PresenterApp {
         if phase == DispatchPhase::Bubble {
           let _ = app.update(cx, |app, cx| {
             if app.pressed.is_none() {
-              // The hand cursor over a link (pointer mode only: drawing over a link draws).
+              // The hand cursor over a link (a click follows it in both modes).
               let pos = to_f32(e.position);
-              let over = app.mode == InputMode::Pointer
-                && hitbox.is_hovered(window)
-                && rect.contains(&pos)
-                && app.link_at(page, screen_to_slide(rect, uv, pos)).is_some();
+              let over = hitbox.is_hovered(window) && rect.contains(&pos) && app.link_at(page, screen_to_slide(rect, uv, pos)).is_some();
               if over != (app.link_hover == Some(surface)) {
                 app.link_hover = over.then_some(surface);
                 cx.notify();
@@ -1747,7 +1744,7 @@ impl PresenterApp {
             .is_some_and(|(start, at)| at.elapsed() < Duration::from_millis(400) && (start.x - pos.x).hypot(start.y - pos.y) < 6.0);
           app.release(surface);
           if click
-            && app.mode == InputMode::Pointer
+            && e.button == MouseButton::Left
             && !crate::platform::zoom_modifier(e.modifiers)
             && let Some(target) = app.link_at(page, screen_to_slide(rect, uv, pos))
           {
@@ -1778,6 +1775,12 @@ impl PresenterApp {
   /// Queue a picture to render once the current frame is on screen.
   fn want_prefetch(&mut self, item: (usize, Region, [u32; 2]), cx: &mut Context<Self>) {
     if !self.prefetch.contains(&item) {
+            // In draw mode the press began a dot, but the click was meant for the link.
+            if app.mode == InputMode::Draw
+              && let Some(strokes) = app.strokes.get_mut(&page)
+            {
+              strokes.pop();
+            }
       self.prefetch.push(item);
     }
     if self.prefetch_task.is_some() {
@@ -1943,7 +1946,7 @@ impl PresenterApp {
       ("R", "Reset the talk timer"),
       ("K", "Pause / resume the talk timer (also in the footer)"),
       ("Number + Enter", "Go to that slide"),
-      ("Click a link", "Follow it (pointer mode)"),
+      ("Click a link", "Follow it"),
       ("L", "Flip layout (H/V with no notes; 4 presets with notes)"),
       ("T", "Toggle the slide thumbnail strip"),
       ("S", "Swap presenter / presentation screens"),

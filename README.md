@@ -116,7 +116,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | `C` | Toggle the webcam overlay (settings in the ⚙ popover) |
 | `P` / `D` | Toggle laser pointer / drawing · delete the drawings on this slide |
 | Hold mouse on current slide (either window) | Laser pointer / draw (shown on the audience screen) |
-| Click a link (pointer mode) | Follow it: jump to the slide, or open a web or mail link |
+| Click a link (pointer or drawing mode) | Follow it: jump to the slide, or open a web or mail link |
 | `Ctrl`, `Alt`/`⌥` or `⌘` + scroll / drag (either window) | Zoom at the cursor / pan the zoomed slide |
 | Double-click (audience) | Toggle fullscreen |
 | Drag & drop a PDF | Open it |
