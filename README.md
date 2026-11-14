@@ -141,12 +141,11 @@ Rendering needs Google's PDFium (loaded at runtime). Fetch the prebuilt library 
 
 ```bash
 just setup-pdfium        # downloads PDFium into third_party/pdfium/ (git-ignored)
-just run                 # open the example deck (no notes)
-just run-notes           # open the example deck (with speaker notes)
+just run                 # open the showcase deck (every feature)
 just run file=deck.pdf   # open your own PDF
 ```
 
-Without `just`: `cargo run --release -- examples/04-aprog-ptr-en.pdf` (PDFium must be reachable — next to the binary, in `third_party/pdfium/lib/`, or via `$PDFIUM_LIB_DIR`).
+Without `just`: `cargo run --release -- examples/showcase.pdf` (PDFium must be reachable — next to the binary, in `third_party/pdfium/lib/`, or via `$PDFIUM_LIB_DIR`).
 
 ## Packaging
 

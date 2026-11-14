@@ -1,5 +1,5 @@
-//! Headless smoke test for the render pipeline (no GUI): load PDFium, open the
-//! example decks, detect notes layout, and rasterize a page.
+//! Headless smoke test for the render pipeline (no GUI): load PDFium, open the example deck,
+//! detect its notes page, rasterize pages and read its media.
 //!
 //! NOTE: PDFium is single-threaded — its library init is not safe to call from
 //! multiple threads at once. `cargo test` runs each `#[test]` on its own thread,
@@ -10,54 +10,51 @@
 use std::path::Path;
 
 use bella_presenter::document::{Document, NotesLayout};
+use bella_presenter::media::{Format, Item, Source};
+use bella_presenter::render::Region;
 
 #[test]
 fn render_pipeline_smoke() {
-  // Skip when the sample decks aren't present (e.g. a checkout without them).
-  let plain_path = Path::new("examples/04-aprog-ptr-en.pdf");
-  let notes_path = Path::new("examples/04-aprog-ptr-notes-en.pdf");
-  if !plain_path.exists() || !notes_path.exists() {
-    eprintln!("skipping: example PDFs not present");
+  // Skip when the example deck isn't present (e.g. a checkout without it).
+  let path = Path::new("examples/showcase.pdf");
+  if !path.exists() {
+    eprintln!("skipping: examples/showcase.pdf not present");
     return;
   }
+  let deck = Document::open(path).expect("open showcase");
 
-  // Plain deck: no notes, renders to the requested pixel size, not a flat color.
-  let plain = Document::open(plain_path).expect("open plain deck");
-  assert_eq!(plain.page_count(), 32);
-  assert_eq!(plain.notes_layout(), NotesLayout::None);
+  // One double-width page (slide + notes) makes it a notes deck; plain 16:9 pages stay whole.
+  assert!(matches!(deck.notes_layout(), NotesLayout::Split(_)));
+  assert_eq!(deck.slide_region(0), Region::FULL);
+  assert!(deck.render_notes(0, [400, 225]).expect("notes ok").is_none());
 
-  let img = plain.render_page(0, [800, 450]).expect("render page 0");
-  assert_eq!(img.width(), 800);
-  assert!(img.height() > 0);
+  // A plain page renders at the requested size and is not a flat color.
+  let img = deck.render_page(0, [800, 450]).expect("render page 0");
+  assert_eq!((img.width(), img.height()), (800, 450));
   let first = img.as_raw().first().copied();
   assert!(
     img.as_raw().iter().any(|p| Some(*p) != first),
     "rendered page should not be a single flat color"
   );
 
-  // Pixels come in GPUI's BGRA order: the crimson logo square (#AA0159) has its red third.
-  let [b, _, r, _] = img.get_pixel(600, 200).0;
-  assert!(r > 150 && b < 110, "logo pixel b={b} r={r}: red and blue swapped?");
+  // Pixels come in GPUI's BGRA order: a part divider is filled crimson (#AA0159).
+  let divider = (0..deck.page_count())
+    .find(|p| {
+      let img = deck.render_slide(*p, [32, 18]).expect("render");
+      let [b, _, r, _] = img.get_pixel(1, 1).0;
+      r > 150 && b < 110
+    })
+    .expect("a crimson divider page: red and blue swapped?");
+  assert!(divider > 0);
 
-  // Plain deck has no notes region.
-  assert!(plain.render_notes(0, [400, 300]).expect("notes ok").is_none());
-
-  // Notes deck (double-width page) is detected as split notes.
-  let notes = Document::open(notes_path).expect("open notes deck");
-  assert_eq!(notes.page_count(), 32);
-  assert!(matches!(notes.notes_layout(), NotesLayout::Split(_)));
-
-  // The slide half of a doubled page is ~16:9 (about half the full page's ~3.56).
-  assert!((notes.slide_aspect(0) - 1.78).abs() < 0.2, "slide aspect {}", notes.slide_aspect(0));
-
-  // Rendering the slide region at 640x360 yields exactly that, and the notes region exists.
-  let slide = notes.render_slide(0, [640, 360]).expect("render slide region");
+  // The notes page: the slide half is ~16:9, and the notes half rendered on its own matches the
+  // right half of the whole page.
+  let notes = (0..deck.page_count()).find(|p| deck.notes_region(*p).is_some()).expect("a notes page");
+  assert!((deck.slide_aspect(notes) - 1.78).abs() < 0.05, "slide aspect {}", deck.slide_aspect(notes));
+  let slide = deck.render_slide(notes, [640, 360]).expect("render slide region");
   assert_eq!((slide.width(), slide.height()), (640, 360));
-  let notes_img = notes.render_notes(0, [640, 360]).expect("notes ok").expect("notes present");
-  assert_eq!((notes_img.width(), notes_img.height()), (640, 360));
-
-  // The notes half rendered on its own matches the right half of the whole page.
-  let whole = notes.render_page(0, [1280, 360]).expect("render whole page");
+  let notes_img = deck.render_notes(notes, [640, 360]).expect("notes ok").expect("notes present");
+  let whole = deck.render_page(notes, [1280, 360]).expect("render whole page");
   let right = image::imageops::crop_imm(&whole, 640, 0, 640, 360).to_image();
   let differing = notes_img
     .pixels()
@@ -65,4 +62,38 @@ fn render_pipeline_smoke() {
     .filter(|(a, b)| a.0.iter().zip(b.0).any(|(x, y)| x.abs_diff(y) > 8))
     .count();
   assert!(differing < 640 * 360 / 100, "{differing} pixels differ");
+
+  // Media come out of the manifest and attachments; one sits on the slide half of the notes page.
+  assert!(deck.media_warnings().is_empty(), "{:?}", deck.media_warnings());
+  assert_eq!(deck.slide_media(notes).len(), 1);
+  let kind = |m: &Item| (m.format, matches!(m.source, Source::Embedded(_)));
+  let on_page = |page: usize| deck.media().iter().filter(|m| m.page == page).map(kind).collect::<Vec<_>>();
+  // The four-section slide: local GIF, web GIF, local MP4, web MP4.
+  let four = deck.media().iter().map(|m| m.page).find(|p| on_page(*p).len() == 4).expect("four-media slide");
+  assert_eq!(
+    on_page(four),
+    [(Format::Gif, true), (Format::Gif, false), (Format::Mp4, true), (Format::Mp4, false)]
+  );
+
+  // The web GIF there has no poster, so it shows a black block: its edges are the media rectangle
+  // (top-left origin, y down), so playing media covers the placeholder exactly.
+  let (w, h) = (1000, 563);
+  let (_, area) = deck.slide_media(four)[1];
+  let img = deck.render_slide(four, [w, h]).expect("render media page");
+  let black = |x: u32, y: u32| img.get_pixel(x, y).0[..3].iter().all(|c| *c < 30);
+  let (cx, cy) = (((area.x + area.w / 2.0) * w as f32) as u32, ((area.y + area.h / 2.0) * h as f32) as u32);
+  // The solid black run through the centre, along each axis.
+  let left = (0..cx).rev().find(|x| !black(*x, cy)).map_or(0, |x| x + 1);
+  let right = (cx..w).find(|x| !black(*x, cy)).unwrap_or(w);
+  let top = (0..cy).rev().find(|y| !black(cx, *y)).map_or(0, |y| y + 1);
+  let bottom = (cy..h).find(|y| !black(cx, *y)).unwrap_or(h);
+  let near = |px: u32, at: f32| (px as f32 - at).abs() <= 1.5;
+  assert!(
+    near(left, area.x * w as f32) && near(right, (area.x + area.w) * w as f32),
+    "{left}..{right} {area:?}"
+  );
+  assert!(
+    near(top, area.y * h as f32) && near(bottom, (area.y + area.h) * h as f32),
+    "{top}..{bottom} {area:?}"
+  );
 }

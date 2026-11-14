@@ -11,8 +11,7 @@ project_directory := justfile_directory()
 release := `git describe --tags --always 2>/dev/null || echo v0.1.0`
 version := "0.6.1"
 url := "https://github.com/tschinz/bella-presenter"
-file := "examples/04-aprog-ptr-en.pdf"
-notes_file := "examples/04-aprog-ptr-notes-en.pdf"
+file := "examples/showcase.pdf"
 
 # Prebuilt PDFium library asset for this platform (from bblanchon/pdfium-binaries)
 pdfium_asset := if os() == "macos" {
@@ -159,10 +158,6 @@ run-empty args=args:
 # Run the presenter (release) on a PDF
 run-release file=file args=args:
     cargo run --release -- {{ file }} {{ args }}
-
-# Open the example deck that has speaker notes
-run-notes args=args:
-    cargo run -- {{ notes_file }} {{ args }}
 
 ##################################################
 # Bundle (self-contained app packages, ship PDFium inside)
