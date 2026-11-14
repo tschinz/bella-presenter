@@ -1,6 +1,7 @@
 //! bella-presenter library crate: the app modules, shared by the binary and tests.
 
 pub mod app;
+pub mod audio;
 pub mod camera;
 pub mod config;
 pub mod document;

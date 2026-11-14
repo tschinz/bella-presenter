@@ -1,9 +1,12 @@
 // bella-media.typ: animated media (GIF, MP4, WebM) for slides shown with bella-presenter.
 //
 //   #import "/bella-media.typ": media, media-url
-//   #media("examples/clips/counter.gif", width: 8cm, height: 4.5cm)
-//   #media("examples/clips/testsrc.mp4", width: 8cm, height: 4.5cm, poster: "examples/clips/testsrc-poster.png")
+//   #media("clips/demo.gif", width: 8cm, height: 4.5cm)
+//   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, poster: "clips/demo-poster.png")
+//   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, muted: true)   // without its sound
 //   #media-url("https://example.org/clip.gif", width: 8cm, height: 4.5cm)
+//
+// Videos play their sound; `muted: true` silences a clip.
 //
 // The page shows a static placeholder in the media rectangle (a GIF's first frame, the poster, or
 // a black block), so any PDF viewer shows something sensible. The media files and a manifest,
@@ -20,7 +23,7 @@
 //   w_pt h_pt size in points
 //   mime      image/gif, video/mp4 or video/webm
 //   file url  attachment name ("media/...") or web address; the other one is null
-//   autoplay loop muted   playback hints
+//   autoplay loop muted   playback hints (a video plays its sound unless muted)
 
 #let _items = counter("bella-media")
 
@@ -123,6 +126,7 @@
 /// - src: path (see above) or bytes
 /// - name: attachment file name, required when `src` is bytes
 /// - poster: none (GIF: first frame, video: black), an image path or bytes, or any content
+/// - muted: true silences a video's sound
 #let media(
   src,
   width: 100%,
@@ -132,7 +136,7 @@
   poster: none,
   autoplay: true,
   loop: true,
-  muted: true,
+  muted: false,
 ) = {
   let name = if name != auto { name } else if type(src) == str { _base-name(src) } else {
     panic("bella-media: pass name: for media given as bytes")
@@ -152,7 +156,7 @@
   poster: none,
   autoplay: true,
   loop: true,
-  muted: true,
+  muted: false,
 ) = {
   if "youtube.com/" in url or "youtu.be/" in url {
     panic("bella-media: YouTube serves no video file to play; link to the page instead")

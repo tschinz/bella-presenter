@@ -55,6 +55,8 @@ ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "n
 # Slide media (bella-media.typ): H.264 decoding (built from source) and the MP4 container.
 openh264 = "0.9.10"
 mp4 = "0.14.0"
+symphonia = { version = "0.6.1", default-features = false, features = ["aac", "isomp4"] }
+cpal = "0.18.2"
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering

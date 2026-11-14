@@ -3,8 +3,8 @@
 //! slide over its placeholder.
 //!
 //! A clip decodes on its own thread into a channel of two frames, so it only runs ahead of the
-//! screen by that much; dropping its [`Player`] ends the thread. There is no audio output, so every
-//! clip plays muted.
+//! screen by that much; dropping its [`Player`] ends the thread. A video plays its sound
+//! too unless it is muted (see [`crate::audio`]).
 
 use std::collections::HashMap;
 use std::collections::hash_map::Entry;
@@ -23,6 +23,7 @@ use openh264::formats::YUVSource as _;
 use serde::Deserialize;
 
 use crate::Waker;
+use crate::audio::{self, Sound};
 use crate::render::{PageSize, Region};
 
 /// The name of the manifest attachment.
@@ -55,6 +56,8 @@ pub struct Item {
   pub source: Source,
   pub autoplay: bool,
   pub looping: bool,
+  /// Whether a video's sound is silenced (it plays by default).
+  pub muted: bool,
 }
 
 /// A manifest entry as `bella-media.typ` writes it.
@@ -75,6 +78,8 @@ struct ManifestEntry {
   autoplay: bool,
   #[serde(default = "yes", rename = "loop")]
   looping: bool,
+  #[serde(default)]
+  muted: bool,
 }
 
 fn yes() -> bool {
@@ -155,6 +160,7 @@ fn item(e: ManifestEntry, page_sizes: &[PageSize], files: &HashMap<String, Arc<[
     source,
     autoplay: e.autoplay,
     looping: e.looping,
+    muted: e.muted,
   })
 }
 
@@ -279,39 +285,53 @@ fn swap_red_blue(image: &mut RgbaImage) {
 }
 
 /// One clip: decoding in the background and the clock that says which frame shows.
+///
+/// The clock is media time: the sound's position when the clip plays its sound, otherwise wall
+/// time while it runs. It runs while the clip plays and its slide is shown.
 pub struct Player {
   format: Format,
   bytes: Arc<[u8]>,
   looping: bool,
+  with_sound: bool,
   frames: Receiver<Result<Frame, String>>,
-  /// A decoded frame waiting for its turn.
-  next: Option<Frame>,
-  /// When the frame on screen ends; `None` before the first one.
-  until: Option<Instant>,
+  /// Media time when the picture on screen ends (zero before the first one).
+  until: Duration,
   playing: bool,
-  /// Time left of the frame on screen, while paused.
-  paused_left: Duration,
+  /// Whether the slide is covered (black screen, whiteboard): the clock stands still.
+  hidden: bool,
   /// Whether the clip ever played (a played clip restarts from the beginning next time).
   started: bool,
   /// Whether a clip that does not loop reached its end.
   ended: bool,
+  /// Wall clock without sound: media time run before `since`, and since when it runs.
+  run: Duration,
+  since: Option<Instant>,
+  /// The clip's sound, which is then the clock.
+  sound: Option<Sound>,
 }
 
 impl Player {
-  /// Start decoding `bytes`; the clip plays at once when `playing`.
-  pub fn new(format: Format, bytes: Arc<[u8]>, looping: bool, playing: bool) -> Self {
+  /// Start decoding `bytes`; the clip plays as soon as it is shown when `playing`, with its sound
+  /// when `with_sound` and the clip has one (an MP4 with AAC).
+  pub fn new(format: Format, bytes: Arc<[u8]>, looping: bool, playing: bool, with_sound: bool) -> Self {
     let frames = spawn_decoder(format, bytes.clone(), looping);
+    let sound = (with_sound && format == Format::Mp4 && audio::has_sound(&bytes))
+      .then(|| Sound::new(bytes.clone(), looping))
+      .and_then(|sound| sound.map_err(|e| tracing::warn!("no sound for a clip: {e:#}")).ok());
     Self {
       format,
       bytes,
       looping,
+      with_sound,
       frames,
-      next: None,
-      until: None,
+      until: Duration::ZERO,
       playing,
-      paused_left: Duration::ZERO,
+      hidden: false,
       started: false,
       ended: false,
+      run: Duration::ZERO,
+      since: None,
+      sound,
     }
   }
 
@@ -325,7 +345,7 @@ impl Player {
 
   /// Start over from the first frame, playing.
   pub fn restart(&mut self) {
-    *self = Self::new(self.format, self.bytes.clone(), self.looping, true);
+    *self = Self::new(self.format, self.bytes.clone(), self.looping, true, self.with_sound);
   }
 
   /// Pause or resume; an ended clip starts over.
@@ -333,53 +353,98 @@ impl Player {
     if self.ended {
       self.restart();
     } else if self.playing {
-      self.paused_left = self.until.map_or(Duration::ZERO, |t| t.saturating_duration_since(now));
+      self.halt(now);
       self.playing = false;
     } else {
-      self.until = self.until.map(|_| now + self.paused_left);
       self.playing = true;
+      if self.started && !self.hidden {
+        self.go(now);
+      }
+    }
+  }
+
+  /// Hold the clock while the slide is covered (black screen, whiteboard), and go on after.
+  pub fn set_hidden(&mut self, hidden: bool, now: Instant) {
+    if hidden == self.hidden {
+      return;
+    }
+    self.hidden = hidden;
+    if self.playing && self.started {
+      if hidden { self.halt(now) } else { self.go(now) }
+    }
+  }
+
+  fn go(&mut self, now: Instant) {
+    self.since = Some(now);
+    if let Some(sound) = &self.sound {
+      sound.play();
+    }
+  }
+
+  fn halt(&mut self, now: Instant) {
+    if let Some(since) = self.since.take() {
+      self.run += now.saturating_duration_since(since);
+    }
+    if let Some(sound) = &self.sound {
+      sound.pause();
+    }
+  }
+
+  /// Media time at `now`.
+  fn clock(&self, now: Instant) -> Duration {
+    match &self.sound {
+      Some(sound) => sound.position(),
+      None => self.run + self.since.map_or(Duration::ZERO, |s| now.saturating_duration_since(s)),
     }
   }
 
   /// The picture due at `now`, if it changed. Errors are decoding failures (the clip stops).
   pub fn poll(&mut self, now: Instant) -> Result<Option<RgbaImage>, String> {
-    if !self.playing {
+    if !self.playing || self.hidden {
       return Ok(None);
     }
-    self.started = true;
-    if self.until.is_some_and(|t| now < t) {
-      return Ok(None);
+    if !self.started {
+      self.started = true;
+      self.go(now);
     }
-    let frame = match self.next.take() {
-      Some(frame) => frame,
-      None => match self.frames.try_recv() {
+    let clock = self.clock(now);
+    let mut shown = None;
+    while clock >= self.until {
+      let frame = match self.frames.try_recv() {
         Ok(Ok(frame)) => frame,
         Ok(Err(e)) => {
-          self.playing = false;
-          self.ended = true;
+          self.end(now);
           return Err(e);
         }
-        Err(TryRecvError::Empty) => return Ok(None),
+        Err(TryRecvError::Empty) => break,
         Err(TryRecvError::Disconnected) => {
-          self.playing = false;
-          self.ended = true;
-          return Ok(None);
+          self.end(now);
+          break;
         }
-      },
-    };
-    // Keep the pace, but after a stall (pause, slow decode) go on from now instead of rushing.
-    let start = match self.until {
-      Some(t) if now.saturating_duration_since(t) < frame.duration => t,
-      _ => now,
-    };
-    self.until = Some(start + frame.duration);
-    Ok(Some(frame.bgra))
+      };
+      if self.sound.is_some() {
+        // The sound sets the pace: a picture that fell behind is skipped.
+        self.until += frame.duration;
+      } else {
+        // Keep the pace, but after a slow decode go on from now instead of rushing.
+        let behind = clock.saturating_sub(self.until) >= frame.duration;
+        self.until = if behind { clock } else { self.until } + frame.duration;
+      }
+      shown = Some(frame.bgra);
+    }
+    Ok(shown)
+  }
+
+  fn end(&mut self, now: Instant) {
+    self.halt(now);
+    self.playing = false;
+    self.ended = true;
   }
 
   /// When to call [`Self::poll`] again: at the next frame, or shortly while the decoder catches up.
   pub fn wake_in(&self, now: Instant) -> Option<Duration> {
-    let wait = self.until.map_or(Duration::ZERO, |t| t.saturating_duration_since(now));
-    self.playing.then_some(wait.max(Duration::from_millis(8)))
+    let wait = self.until.saturating_sub(self.clock(now));
+    (self.playing && !self.hidden).then_some(wait.max(Duration::from_millis(8)))
   }
 }
 
@@ -467,7 +532,7 @@ impl Playback {
         && !self.running.contains_key(&i)
         && let Some(bytes) = self.bytes(&item.source)
       {
-        let player = Player::new(item.format, bytes, item.looping, item.autoplay);
+        let player = Player::new(item.format, bytes, item.looping, item.autoplay, !item.muted);
         let picture = None;
         self.running.insert(
           i,
@@ -478,6 +543,9 @@ impl Playback {
           },
         );
       }
+    }
+    for r in self.running.values_mut().filter(|r| r.page == current) {
+      r.player.set_hidden(!visible, now);
     }
     if !visible {
       return None;
@@ -583,14 +651,14 @@ mod tests {
   fn reads_the_manifest_into_page_relative_items() {
     let json = r#"[
       {"kind":"file","page":2,"x_pt":72,"y_pt":40.5,"w_pt":360,"h_pt":202.5,"mime":"video/mp4",
-       "file":"media/a.mp4","url":null,"autoplay":false,"loop":true,"muted":true},
+       "file":"media/a.mp4","url":null,"autoplay":false,"loop":true},
       {"kind":"url","page":1,"x_pt":0,"y_pt":0,"w_pt":720,"h_pt":405,"mime":"image/gif",
        "file":null,"url":"https://example.org/a.gif","autoplay":true,"loop":false,"muted":true}]"#;
     let (items, warnings) = parse(json, &[("media/a.mp4", b"mp4")]);
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(items.len(), 2);
     let a = &items[0];
-    assert_eq!((a.page, a.format, a.autoplay, a.looping), (1, Format::Mp4, false, true));
+    assert_eq!((a.page, a.format, a.autoplay, a.looping, a.muted), (1, Format::Mp4, false, true, false));
     assert_eq!(
       a.area,
       Region {
@@ -675,7 +743,7 @@ mod tests {
       false
     })
     .expect("decodes");
-    let mut player = Player::new(Format::Gif, bytes.into(), true, true);
+    let mut player = Player::new(Format::Gif, bytes.into(), true, true, false);
     let t0 = Instant::now();
     let first = loop {
       if let Some(frame) = player.poll(t0).expect("plays") {
