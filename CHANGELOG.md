@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.1] - 2026-11-14
+
+### 🚀 Features
+
+- *(media)* Let space start waiting clips before it pauses ([65f999a](https://github.com/tschinz/bella-presenter/commit/65f999ae92305cf8814d39e3c314a4b2f0170772) - zas)
+
+### 🐛 Bug Fixes
+
+- *(media)* Draw posters on a transparent background ([37ce949](https://github.com/tschinz/bella-presenter/commit/37ce94907e75169d663377f2c765dce2e03c3113) - zas)
+
+### 📚 Documentation
+
+- *(media)* Document autoplay, muting and transparent posters ([053e3e8](https://github.com/tschinz/bella-presenter/commit/053e3e8e02db4d6734110c7a0e89eeb3e711cada) - zas)
+
+
+**Full Changelog**: [v0.7.0...v0.7.1](https://github.com/tschinz/bella-presenter/compare/v0.7.0...v0.7.1)
+
 ## [0.7.0] - 2026-11-14
 
 ### 🚀 Features
