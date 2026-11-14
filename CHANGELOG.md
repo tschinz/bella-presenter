@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.2] - 2026-11-14
+
+### 🐛 Bug Fixes
+
+- *(media)* Draw the first frame of a gif without a black box ([7f03200](https://github.com/tschinz/bella-presenter/commit/7f03200e5aefd3e0d5391ef58b5791f248cda1b1) - zas)
+
+
+**Full Changelog**: [v0.7.1...v0.7.2](https://github.com/tschinz/bella-presenter/compare/v0.7.1...v0.7.2)
+
 ## [0.7.1] - 2026-11-14
 
 ### 🚀 Features

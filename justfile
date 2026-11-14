@@ -9,7 +9,7 @@ crate_name := "bella_presenter"
 args := ""
 project_directory := justfile_directory()
 release := `git describe --tags --always 2>/dev/null || echo v0.1.0`
-version := "0.7.1"
+version := "0.7.2"
 url := "https://github.com/tschinz/bella-presenter"
 file := "examples/showcase.pdf"
 
