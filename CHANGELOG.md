@@ -12,6 +12,7 @@ All notable changes to this project will be documented in this file.
 ### 🐛 Bug Fixes
 
 - *(media)* Skip clips that are hidden on their page ([f4737f7](https://github.com/tschinz/bella-presenter/commit/f4737f7ace018585e15f2cea519c38e6c2abea20) - zas)
+- *(media)* Open the sound of mp4 clips without probing ([aeff17a](https://github.com/tschinz/bella-presenter/commit/aeff17a6416af24523a0f1f72d7d0b6160ed06e2) - zas)
 
 ### 📚 Documentation
 
@@ -19,6 +20,7 @@ All notable changes to this project will be documented in this file.
 - *(readme)* Explain media in slides and show screen recordings ([6649b07](https://github.com/tschinz/bella-presenter/commit/6649b078d3d47495222044b9454fe4b2bce7e3be) - zas)
 - *(examples)* Show a build and a video with sound in the showcase ([5d20db8](https://github.com/tschinz/bella-presenter/commit/5d20db827637685f73860662c0d9a9768851a2ba) - zas)
 - *(readme)* Explain the sound of clips and how to mute them ([c1aace2](https://github.com/tschinz/bella-presenter/commit/c1aace2bb16e0c412e4cb87c330f8c83b2f66834) - zas)
+- *(examples)* Use the bunny clip with sound as the only local video ([767efa2](https://github.com/tschinz/bella-presenter/commit/767efa2d9071267e62f153b50314633876a35d6b) - zas)
 
 
 **Full Changelog**: [v0.6.1...v0.7.0](https://github.com/tschinz/bella-presenter/compare/v0.6.1...v0.7.0)
