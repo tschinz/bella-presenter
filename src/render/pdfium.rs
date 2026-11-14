@@ -197,4 +197,20 @@ impl PageRenderer for PdfiumRenderer {
       })
       .collect()
   }
+
+  fn attachments(&self) -> Vec<(String, Vec<u8>)> {
+    let attachments = self.document.attachments();
+    attachments
+      .iter()
+      .filter_map(|a| match a.save_to_bytes() {
+        // PDFium turns the "/" of PDF file names into the platform's separator (":" on macOS,
+        // "\\" on Windows); attachment names are compared in PDF form.
+        Ok(bytes) => Some((a.name().replace([':', '\\'], "/"), bytes)),
+        Err(e) => {
+          tracing::warn!("reading PDF attachment {}: {e}", a.name());
+          None
+        }
+      })
+      .collect()
+  }
 }

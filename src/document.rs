@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 use anyhow::Result;
 use image::RgbaImage;
 
+use crate::media;
 use crate::render::pdfium::PdfiumRenderer;
 use crate::render::{Link, PageRenderer, PageSize, Region};
 
@@ -30,17 +31,27 @@ pub struct Document {
   path: PathBuf,
   renderer: Box<dyn PageRenderer>,
   notes: NotesLayout,
+  /// Animated media attached by `bella-media.typ`, and why any item was skipped.
+  media: Vec<media::Item>,
+  media_warnings: Vec<String>,
 }
 
 impl Document {
   pub fn open(path: &Path) -> Result<Self> {
     let renderer = PdfiumRenderer::open(path)?;
     let notes = detect_notes_layout(&renderer);
-    tracing::info!(?notes, pages = renderer.page_count(), "opened document");
+    let sizes: Vec<_> = (0..renderer.page_count()).map(|p| renderer.page_size(p)).collect();
+    let (media, media_warnings) = media::from_attachments(renderer.attachments(), &sizes);
+    for w in &media_warnings {
+      tracing::warn!("{w}");
+    }
+    tracing::info!(?notes, pages = renderer.page_count(), media = media.len(), "opened document");
     Ok(Self {
       path: path.to_path_buf(),
       renderer: Box::new(renderer),
       notes,
+      media,
+      media_warnings,
     })
   }
 
@@ -110,17 +121,30 @@ impl Document {
       .renderer
       .links(page)
       .into_iter()
-      .filter(|link| slide.contains(link.area.x + link.area.w / 2.0, link.area.y + link.area.h / 2.0))
-      .map(|link| Link {
-        area: Region {
-          x: (link.area.x - slide.x) / slide.w,
-          y: (link.area.y - slide.y) / slide.h,
-          w: link.area.w / slide.w,
-          h: link.area.h / slide.h,
-        },
-        ..link
+      .filter_map(|link| {
+        Some(Link {
+          area: on_slide(slide, link.area)?,
+          ..link
+        })
       })
       .collect()
+  }
+
+  /// All media items of the deck (indexes are their ids).
+  pub fn media(&self) -> &[media::Item] {
+    &self.media
+  }
+
+  /// Why media items were skipped when the document was opened.
+  pub fn media_warnings(&self) -> &[String] {
+    &self.media_warnings
+  }
+
+  /// The media on the slide part of `page`: item index and area relative to the slide.
+  pub fn slide_media(&self, page: usize) -> Vec<(usize, Region)> {
+    let slide = self.slide_region(page);
+    let on_page = self.media.iter().enumerate().filter(|(_, m)| m.page == page);
+    on_page.filter_map(|(i, m)| Some((i, on_slide(slide, m.area)?))).collect()
   }
 
   /// Render just the slide portion of a page (the audience view).
@@ -140,6 +164,16 @@ impl Document {
   fn render_region(&self, page: usize, region: Region, target_px: [u32; 2]) -> Result<RgbaImage> {
     self.renderer.render(page, region, target_px)
   }
+}
+
+/// `area` of a page relative to the `slide` part of it, if its centre lies on the slide.
+fn on_slide(slide: Region, area: Region) -> Option<Region> {
+  slide.contains(area.x + area.w / 2.0, area.y + area.h / 2.0).then(|| Region {
+    x: (area.x - slide.x) / slide.w,
+    y: (area.y - slide.y) / slide.h,
+    w: area.w / slide.w,
+    h: area.h / slide.h,
+  })
 }
 
 fn region_aspect(page_aspect: f32, r: Region) -> f32 {
@@ -247,5 +281,28 @@ mod tests {
     assert!(!page_is_split_for(notes, 1.78)); // plain 16:9
     assert!(!page_is_split_for(notes, 1.33)); // plain 4:3
     assert!(!page_is_split_for(NotesLayout::None, 3.56));
+  }
+
+  #[test]
+  fn maps_page_areas_onto_the_slide_half() {
+    // A media rectangle on the left (slide) half of a slide + notes page.
+    let area = Region {
+      x: 0.1,
+      y: 0.2,
+      w: 0.2,
+      h: 0.5,
+    };
+    let on = on_slide(slide_side(NotesSide::Right), area).expect("on the slide");
+    assert_eq!(
+      on,
+      Region {
+        x: 0.2,
+        y: 0.2,
+        w: 0.4,
+        h: 0.5
+      }
+    );
+    assert_eq!(on_slide(Region::FULL, area), Some(area));
+    assert_eq!(on_slide(slide_side(NotesSide::Left), area), None, "on the notes half");
   }
 }

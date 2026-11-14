@@ -40,7 +40,7 @@ gpui-kit = "=0.7.0"
 # The channel that wakes the UI from capture, watcher and worker threads; already in GPUI's tree.
 futures = "0.3"
 pdfium-render = "0.8"
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "gif"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
@@ -52,6 +52,9 @@ notify = "8.2.0"
 nokhwa = { version = "0.10.11", features = ["input-native"] }
 # No "copy-dylibs": its build step fails on a fresh Windows build, and no copied library is shipped.
 ort = { version = "2.0.0-rc.13", default-features = false, features = ["std", "ndarray", "tracing", "download-binaries", "tls-native", "api-27"] }
+# Slide media (bella-media.typ): H.264 decoding (built from source) and the MP4 container.
+openh264 = "0.9.10"
+mp4 = "0.14.0"
 
 [profile.dev]
 opt-level = 1          # keep debug builds snappy for PDF rendering

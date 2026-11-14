@@ -82,4 +82,7 @@ pub trait PageRenderer {
 
   /// The links on `page`.
   fn links(&self, page: usize) -> Vec<Link>;
+
+  /// The files attached to the document, as (name, bytes) in document order.
+  fn attachments(&self) -> Vec<(String, Vec<u8>)>;
 }

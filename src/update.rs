@@ -40,7 +40,13 @@ struct GhAsset {
 /// The latest release if it is newer than this build and has an asset for this platform.
 pub fn check() -> Result<Option<Release>, String> {
   let json = curl(&["--max-time", "20", "-H", "Accept: application/vnd.github+json", LATEST])?;
+  let json = String::from_utf8(json).map_err(|e| e.to_string())?;
   newer_release(&json, env!("CARGO_PKG_VERSION"))
+}
+
+/// The bytes at `url` (slide media on the web), at most 500 MB.
+pub fn fetch(url: &str) -> Result<Vec<u8>, String> {
+  curl(&["--max-time", "300", "--max-filesize", "500M", url])
 }
 
 /// Downloads `release` into a fresh temporary folder and installs it over this app. Returns the
@@ -60,7 +66,7 @@ pub fn install(release: &Release) -> Result<PathBuf, String> {
 }
 
 /// Runs `curl` over HTTPS only, failing on HTTP errors, and returns its output.
-fn curl(args: &[&str]) -> Result<String, String> {
+fn curl(args: &[&str]) -> Result<Vec<u8>, String> {
   let out = crate::platform::quiet_command("curl")
     .args(["--proto", "=https", "--tlsv1.2", "-fsSL"])
     .args(args)
@@ -69,7 +75,7 @@ fn curl(args: &[&str]) -> Result<String, String> {
   if !out.status.success() {
     return Err(format!("curl: {}", String::from_utf8_lossy(&out.stderr).trim()));
   }
-  String::from_utf8(out.stdout).map_err(|e| e.to_string())
+  Ok(out.stdout)
 }
 
 /// The release in the GitHub API answer `json`, if it is newer than `current` and has an asset

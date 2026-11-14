@@ -44,6 +44,7 @@ use crate::Waker;
 use crate::camera::controller::CameraController;
 use crate::config::{self, Geometry};
 use crate::document::Document;
+use crate::media::Playback;
 use crate::render::{self, LinkTarget};
 use crate::screen;
 use crate::session::{Session, format_elapsed};
@@ -189,6 +190,8 @@ pub struct PresenterApp {
   /// Laser-pointer position, normalized (0..1) within the slide, while the mouse
   /// button is held over the current slide. `None` = no pointer shown.
   pointer_norm: Option<Point<f32>>,
+  /// GIF and video clips of the current slide (see `bella-media.typ`), playing over their placeholders.
+  playback: Playback,
   /// Freehand annotations per page (kept while navigating; cleared when the file closes).
   strokes: HashMap<usize, Vec<Stroke>>,
   /// Whether a stroke is currently being drawn.
@@ -405,6 +408,7 @@ impl PresenterApp {
       watcher: None,
       reload_due: None,
       reload_tries: 0,
+      playback: Playback::new(waker.clone()),
       waker,
       wake_at: None,
       dirty: pruned,
@@ -471,6 +475,10 @@ impl PresenterApp {
     self.link_hover = None;
     self.cache.clear();
     self.thumb_cache.clear();
+    self.playback.clear();
+    if let Some(warning) = self.document.as_ref().and_then(|d| d.media_warnings().first()) {
+      self.playback.note = Some(format!("Media skipped: {warning}"));
+    }
     self.thumb_follow_last = usize::MAX;
     self.strokes.clear();
     self.drawing = false;
@@ -909,10 +917,14 @@ impl PresenterApp {
       return;
     }
     match key {
+      // Space plays and pauses the media of a slide that has some, and goes on elsewhere.
+      "space" if self.playback.toggle(self.session.current()) => {}
       "right" | "space" | "pagedown" | "down" => self.session.next(),
       "left" | "pageup" | "up" => self.session.prev(),
       "home" => self.session.first(),
       "end" => self.session.last(),
+      // R restarts the media of a slide that has some, and resets the timer elsewhere.
+      "r" if self.playback.restart(self.session.current()) => {}
       "r" => self.session.timer_mut().reset(),
       "k" => self.session.timer_mut().toggle(),
       "l" => self.flip_layout(),
@@ -1033,6 +1045,12 @@ impl PresenterApp {
     self.poll_update(cx);
     if let Some(after) = self.camera.update(self.presenting, window, cx) {
       self.wake_after(after, cx);
+    }
+    if let Some(doc) = &self.document {
+      let visible = self.cover == Cover::Off;
+      if let Some(after) = self.playback.update(doc.media(), self.session.current(), visible, Instant::now()) {
+        self.wake_after(after, cx);
+      }
     }
     if self.document.is_some() {
       self.sync_recent_page();
@@ -1359,6 +1377,11 @@ impl PresenterApp {
       .child(control("timer-reset", Lucide::RotateCcw, "Reset the timer (R)", |app| {
         app.session.timer_mut().reset()
       }))
+      .when_some(self.playback.note.clone(), |row, note| {
+        row
+          .child(dot())
+          .child(div().text_size(fs * 0.6).font_weight(FontWeight::NORMAL).text_color(c.muted).child(note))
+      })
       .into_any_element()
   }
 
@@ -1638,7 +1661,8 @@ impl PresenterApp {
     cx: &mut Context<Self>,
   ) {
     // Pictures evicted or cleared since the last paint leave the GPU now that a window is at hand.
-    for old in self.cache.evicted.drain(..).chain(self.thumb_cache.evicted.drain(..)) {
+    let evicted = self.cache.evicted.drain(..).chain(self.thumb_cache.evicted.drain(..));
+    for old in evicted.chain(self.playback.evicted.drain(..)) {
       cx.drop_image(old, Some(window));
     }
     let Some(doc) = self.document.as_ref() else { return };
@@ -1657,6 +1681,14 @@ impl PresenterApp {
       window.paint_quad(gpui_kit::fill(rect.map(px), rgb(0xffffff)));
     } else if let Some(image) = cache.get_or_render(doc, page, region, px_size) {
       paint_cropped(window, rect, uv, 0.0, image);
+    }
+    // Clips play on the current slide only; previews and thumbnails keep the placeholder.
+    if current && !board {
+      for (item, area) in doc.slide_media(page) {
+        if let Some(picture) = self.playback.picture(item) {
+          paint_media(window, rect, uv, area, picture);
+        }
+      }
     }
     // Get the following page ready at this size (unzoomed), so moving forward shows it at once.
     if surface != Surface::Thumb && page + 1 < doc.page_count() {
@@ -1973,6 +2005,8 @@ impl PresenterApp {
   fn shortcuts_card(&self, cx: &mut Context<Self>) -> AnyElement {
     let rows = [
       ("→ / Space / PgDn", "Next slide"),
+      ("Space (slide with media)", "Play / pause its GIFs and videos"),
+      ("R (slide with media)", "Restart its GIFs and videos"),
       ("← / PgUp", "Previous slide"),
       ("Home / End", "First / last slide"),
       ("F5", "Start presentation"),
@@ -1981,7 +2015,7 @@ impl PresenterApp {
       (",", "Whiteboard to draw on (both screens)"),
       ("C", "Toggle the webcam overlay"),
       ("W", "Close file, back to start screen"),
-      ("R", "Reset the talk timer"),
+      ("R", "Reset the talk timer (also in the footer)"),
       ("K", "Pause / resume the talk timer (also in the footer)"),
       ("Number + Enter", "Go to that slide"),
       ("Click a link", "Follow it"),
@@ -2401,6 +2435,39 @@ pub(crate) fn paint_cropped(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f
   }
 }
 
+/// Paint a media `picture` letterboxed into its slide-normalized `area`, clipped to the visible
+/// slide `rect` (which shows the slide window `uv`).
+fn paint_media(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f32>, area: render::Region, picture: Arc<RenderImage>) {
+  let frame = picture.size(0);
+  let aspect = frame.width.0 as f32 / frame.height.0.max(1) as f32;
+  let target = contain(media_rect(rect, uv, area), aspect);
+  let clip = target.intersect(&rect);
+  if clip.size.width <= 0.0 || clip.size.height <= 0.0 {
+    return;
+  }
+  if let Err(e) = window.paint_image(clip.map(px), target.map(px), Corners::default(), picture, 0, false) {
+    tracing::warn!("painting media failed: {e:#}");
+  }
+}
+
+/// Where the slide-normalized `area` is on screen, by the same transform as the slide picture.
+fn media_rect(rect: Bounds<f32>, uv: Bounds<f32>, area: render::Region) -> Bounds<f32> {
+  let a = slide_to_screen(rect, uv, point(area.x, area.y));
+  let b = slide_to_screen(rect, uv, point(area.x + area.w, area.y + area.h));
+  Bounds::new(a, size(b.x - a.x, b.y - a.y))
+}
+
+/// The largest centred box of `aspect` (w/h) inside `outer`, as CSS `object-fit: contain`.
+fn contain(outer: Bounds<f32>, aspect: f32) -> Bounds<f32> {
+  let (w, h) = (outer.size.width, outer.size.height);
+  let fit = if w / h.max(1e-6) > aspect {
+    size(h * aspect, h)
+  } else {
+    size(w, w / aspect.max(1e-6))
+  };
+  Bounds::centered_at(outer.center(), fit)
+}
+
 /// A picture for GPUI, whose pixels are already in its BGRA order.
 pub(crate) fn render_image(bgra: image::RgbaImage) -> Arc<RenderImage> {
   Arc::new(RenderImage::new(vec![image::Frame::new(bgra)]))
@@ -2595,6 +2662,34 @@ mod tests {
     // Between the two points of a long segment: nothing of it is left.
     erase(&mut strokes, point(4.5, 5.0), 1.0, |p| p);
     assert_eq!(strokes.len(), 3);
+  }
+
+  #[test]
+  fn media_sits_where_the_slide_shows_it_zoomed_and_offset() {
+    // A 16:9 slide letterboxed into a 4:3 window that starts at (100, 50), zoomed 2x on its right half.
+    let view = SlideView::new(Bounds::new(point(100.0, 50.0), size(800.0, 600.0)), 16.0 / 9.0);
+    let (uv, rect) = view.zoomed(1.0, SLIDE_CENTER);
+    assert_eq!(rect, Bounds::new(point(100.0, 125.0), size(800.0, 450.0)));
+    let area = render::Region {
+      x: 0.5,
+      y: 0.25,
+      w: 0.25,
+      h: 0.5,
+    };
+    let r = media_rect(rect, uv, area);
+    assert_eq!(r, Bounds::new(point(500.0, 237.5), size(200.0, 225.0)));
+    let (uv, rect) = view.zoomed(2.0, point(0.75, 0.5));
+    let r = media_rect(rect, uv, area);
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-3;
+    assert!(close(r.origin.x, 100.0) && close(r.origin.y, 125.0), "{r:?}");
+    assert!(close(r.size.width, 400.0) && close(r.size.height, 450.0), "{r:?}");
+  }
+
+  #[test]
+  fn contain_letterboxes_like_css() {
+    let outer = Bounds::new(point(10.0, 20.0), size(400.0, 100.0));
+    assert_eq!(contain(outer, 2.0), Bounds::new(point(110.0, 20.0), size(200.0, 100.0)));
+    assert_eq!(contain(outer, 8.0), Bounds::new(point(10.0, 45.0), size(400.0, 50.0)));
   }
 
   fn wide_area() -> Bounds<f32> {
