@@ -75,6 +75,17 @@ fn render_pipeline_smoke() {
     [(Format::Gif, true), (Format::Gif, false), (Format::Mp4, true), (Format::Mp4, false)]
   );
 
+  // A build in two steps: the clip is hidden on step 1 (still in the manifest) and drawn on step 2,
+  // so only step 2 plays it.
+  assert_eq!(deck.media_hidden(), 1, "the hidden build step");
+  let step2 = (1..deck.page_count())
+    .find(|p| on_page(*p) == [(Format::Mp4, true)] && on_page(p - 1).is_empty() && deck.slide_aspect(p - 1) == deck.slide_aspect(*p))
+    .expect("build step 2 with its clip, after step 1 without");
+  assert!(step2 > four);
+  // Videos play their sound by default: of the embedded videos, only the one with sound is not muted.
+  let videos = deck.media().iter().filter(|m| kind(m) == (Format::Mp4, true));
+  assert_eq!(videos.filter(|m| !m.muted).count(), 1);
+
   // The web GIF there has no poster, so it shows a black block: its edges are the media rectangle
   // (top-left origin, y down), so playing media covers the placeholder exactly.
   let (w, h) = (1000, 563);

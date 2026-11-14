@@ -352,7 +352,7 @@
       section("GIF local", media("examples/clips/big-lebowski-1.gif", width: mw, height: mh)),
       // The GIF file of https://giphy.com/gifs/big-lebowski-yk8tRCZHCV0qY (the page itself is HTML).
       section("GIF url", media-url("https://media.giphy.com/media/yk8tRCZHCV0qY/giphy.gif", width: mw, height: mh)),
-      section("Video local", media("examples/clips/spl.mp4", width: mw, height: mh, poster: "examples/clips/spl.svg")),
+      section("Video local", media("examples/clips/spl.mp4", width: mw, height: mh, poster: "examples/clips/spl.svg", muted: true)),
       section("Video url", media-url(
         "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
         width: mw,
@@ -364,6 +364,29 @@
 }
 
 #four-media("Animated GIFs and videos", [Embedded in the PDF, or loaded from a URL])
+
+// A build in two steps, as touying's `#pause` makes them: the clip is laid out but hidden on step 1
+// (like content after a pause) and shows on step 2. bella-presenter must play it on step 2 only.
+#let build-step(step) = slide("Clips in builds (step " + str(step) + " of 2)", {
+  try[step 1 hides the clip (like content after `#pause`), so nothing plays; `→` shows it.]
+  v(0.4cm)
+  let clip = media("examples/clips/spl.mp4", width: 12cm, height: 6.75cm, poster: "examples/clips/spl.svg", muted: true)
+  align(center, if step == 1 { hide(clip) } else { clip })
+})
+#build-step(1)
+#build-step(2)
+
+#slide("Video with sound", {
+  try[videos play their sound (`muted: true` silences them); `Space` pauses both, `R` starts over.]
+  v(0.4cm)
+  align(center, media(
+    "examples/clips/big-buck-bunny-sound.mp4",
+    width: 10.4cm,
+    height: 5.85cm,
+    poster: "examples/clips/buck-bunny.jpg",
+  ))
+  align(center, text(size: 11pt, fill: muted)[Big Buck Bunny, © Blender Foundation, #link("https://peach.blender.org")[peach.blender.org], CC BY 3.0])
+})
 
 #slide("How clips play", {
   try[go back one slide and forward again: the clip starts over.]
