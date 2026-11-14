@@ -352,7 +352,7 @@
       section("GIF local", media("examples/clips/big-lebowski-1.gif", width: mw, height: mh)),
       // The GIF file of https://giphy.com/gifs/big-lebowski-yk8tRCZHCV0qY (the page itself is HTML).
       section("GIF url", media-url("https://media.giphy.com/media/yk8tRCZHCV0qY/giphy.gif", width: mw, height: mh)),
-      section("Video local", media("examples/clips/spl.mp4", width: mw, height: mh, poster: "examples/clips/spl.svg", muted: true)),
+      section("Video local", media("examples/clips/big-buck-bunny-sound.mp4", width: mw, height: mh, poster: "examples/clips/buck-bunny.jpg", muted: true)),
       section("Video url", media-url(
         "https://test-videos.co.uk/vids/bigbuckbunny/mp4/h264/360/Big_Buck_Bunny_360_10s_1MB.mp4",
         width: mw,
@@ -370,7 +370,7 @@
 #let build-step(step) = slide("Clips in builds (step " + str(step) + " of 2)", {
   try[step 1 hides the clip (like content after `#pause`), so nothing plays; `→` shows it.]
   v(0.4cm)
-  let clip = media("examples/clips/spl.mp4", width: 12cm, height: 6.75cm, poster: "examples/clips/spl.svg", muted: true)
+  let clip = media("examples/clips/big-buck-bunny-sound.mp4", width: 12cm, height: 6.75cm, poster: "examples/clips/buck-bunny.jpg", muted: true)
   align(center, if step == 1 { hide(clip) } else { clip })
 })
 #build-step(1)

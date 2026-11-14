@@ -82,9 +82,10 @@ fn render_pipeline_smoke() {
     .find(|p| on_page(*p) == [(Format::Mp4, true)] && on_page(p - 1).is_empty() && deck.slide_aspect(p - 1) == deck.slide_aspect(*p))
     .expect("build step 2 with its clip, after step 1 without");
   assert!(step2 > four);
-  // Videos play their sound by default: of the embedded videos, only the one with sound is not muted.
-  let videos = deck.media().iter().filter(|m| kind(m) == (Format::Mp4, true));
-  assert_eq!(videos.filter(|m| !m.muted).count(), 1);
+  // Videos play their sound by default; the showcase mutes all but the one on the sound slide.
+  let videos: Vec<_> = deck.media().iter().filter(|m| kind(m) == (Format::Mp4, true)).collect();
+  assert_eq!(videos.iter().filter(|m| !m.muted).count(), 1, "one video with sound");
+  assert!(videos.iter().any(|m| m.page == four && m.muted), "the four-media video is muted");
 
   // The web GIF there has no poster, so it shows a black block: its edges are the media rectangle
   // (top-left origin, y down), so playing media covers the placeholder exactly.
