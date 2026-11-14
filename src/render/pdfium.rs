@@ -198,6 +198,37 @@ impl PageRenderer for PdfiumRenderer {
       .collect()
   }
 
+  fn draws_in(&self, page: usize, area: Region) -> bool {
+    let Ok(index) = u16::try_from(page) else { return false };
+    let Ok(pdf_page) = self.document.pages().get(index) else {
+      return false;
+    };
+    let size = self.page_size(page);
+    // PDF rectangles count up from the bottom; ours from the top.
+    let target = PdfBox {
+      left: area.x * size.width,
+      right: (area.x + area.w) * size.width,
+      bottom: (1.0 - area.y - area.h) * size.height,
+      top: (1.0 - area.y) * size.height,
+    };
+    pdf_page.objects().iter().any(|object| {
+      let Ok(b) = object.bounds() else { return false };
+      let bounds = PdfBox {
+        left: b.left().value,
+        right: b.right().value,
+        bottom: b.bottom().value,
+        top: b.top().value,
+      };
+      // A group may hold the drawing among other content: any overlap counts, so a visible
+      // clip is never skipped.
+      if object.as_x_object_form_object().is_some() {
+        bounds.overlaps(&target)
+      } else {
+        target.encloses(&bounds)
+      }
+    })
+  }
+
   fn attachments(&self) -> Vec<(String, Vec<u8>)> {
     let attachments = self.document.attachments();
     attachments
@@ -212,5 +243,66 @@ impl PageRenderer for PdfiumRenderer {
         }
       })
       .collect()
+  }
+}
+
+/// A rectangle in PDF points, y counting up from the bottom of the page.
+#[derive(Clone, Copy, Debug)]
+struct PdfBox {
+  left: f32,
+  right: f32,
+  bottom: f32,
+  top: f32,
+}
+
+impl PdfBox {
+  /// Slack for rounding in the PDF writer, in points.
+  const SLACK: f32 = 1.0;
+
+  fn encloses(&self, other: &PdfBox) -> bool {
+    other.left >= self.left - Self::SLACK
+      && other.right <= self.right + Self::SLACK
+      && other.bottom >= self.bottom - Self::SLACK
+      && other.top <= self.top + Self::SLACK
+  }
+
+  fn overlaps(&self, other: &PdfBox) -> bool {
+    self.left < other.right && other.left < self.right && self.bottom < other.top && other.bottom < self.top
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+
+  #[test]
+  fn a_drawing_must_lie_inside_the_media_box() {
+    let media = PdfBox {
+      left: 190.0,
+      right: 530.0,
+      bottom: 46.5,
+      top: 237.9,
+    };
+    let placeholder = PdfBox {
+      left: 189.9,
+      right: 530.1,
+      bottom: 46.5,
+      top: 237.9,
+    };
+    let title = PdfBox {
+      left: 46.0,
+      right: 406.0,
+      bottom: 341.0,
+      top: 370.0,
+    };
+    let background = PdfBox {
+      left: 0.0,
+      right: 720.0,
+      bottom: 0.0,
+      top: 405.0,
+    };
+    assert!(media.encloses(&placeholder));
+    assert!(!media.encloses(&title) && !media.encloses(&background), "not drawn in the box");
+    assert!(background.overlaps(&media) && !title.overlaps(&media));
   }
 }

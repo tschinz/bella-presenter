@@ -34,6 +34,8 @@ pub struct Document {
   /// Animated media attached by `bella-media.typ`, and why any item was skipped.
   media: Vec<media::Item>,
   media_warnings: Vec<String>,
+  /// Clips listed in the manifest but hidden on their page (not played).
+  media_hidden: usize,
 }
 
 impl Document {
@@ -41,17 +43,23 @@ impl Document {
     let renderer = PdfiumRenderer::open(path)?;
     let notes = detect_notes_layout(&renderer);
     let sizes: Vec<_> = (0..renderer.page_count()).map(|p| renderer.page_size(p)).collect();
-    let (media, media_warnings) = media::from_attachments(renderer.attachments(), &sizes);
+    let (mut media, media_warnings) = media::from_attachments(renderer.attachments(), &sizes);
+    // A clip whose placeholder is not drawn sits in hidden content, such as a step of a build
+    // (touying's `#pause`) before the clip appears: it must not play over the empty spot.
+    let listed = media.len();
+    media.retain(|m| renderer.draws_in(m.page, m.area));
+    let media_hidden = listed - media.len();
     for w in &media_warnings {
       tracing::warn!("{w}");
     }
-    tracing::info!(?notes, pages = renderer.page_count(), media = media.len(), "opened document");
+    tracing::info!(?notes, pages = renderer.page_count(), media = media.len(), media_hidden, "opened document");
     Ok(Self {
       path: path.to_path_buf(),
       renderer: Box::new(renderer),
       notes,
       media,
       media_warnings,
+      media_hidden,
     })
   }
 
@@ -133,6 +141,11 @@ impl Document {
   /// All media items of the deck (indexes are their ids).
   pub fn media(&self) -> &[media::Item] {
     &self.media
+  }
+
+  /// How many clips of the manifest sit in hidden content and are not played.
+  pub fn media_hidden(&self) -> usize {
+    self.media_hidden
   }
 
   /// Why media items were skipped when the document was opened.

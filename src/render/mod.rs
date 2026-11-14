@@ -85,4 +85,8 @@ pub trait PageRenderer {
 
   /// The files attached to the document, as (name, bytes) in document order.
   fn attachments(&self) -> Vec<(String, Vec<u8>)>;
+
+  /// Whether anything is drawn inside `area` of `page` (normalized like [`Region`]). Content hidden
+  /// with Typst's `hide`, such as a later step of a build, draws nothing.
+  fn draws_in(&self, page: usize, area: Region) -> bool;
 }
