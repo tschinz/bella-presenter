@@ -36,17 +36,21 @@
 
 #let _base-name(path) = path.split("/").last()
 
-// The placeholder filling the media rectangle.
+// The placeholder filling the media rectangle. A poster is drawn as it is, so a transparent image
+// (an SVG, a PNG with alpha) or poster content keeps the slide behind it; without a poster a GIF
+// shows its first frame and a video a black block. The invisible backing box marks the rectangle
+// as drawn on this page (hidden content draws nothing), which bella-presenter checks before playing.
 #let _placeholder(poster, gif-data) = {
-  let fill(body) = block(width: 100%, height: 100%, fill: black, align(center + horizon, body))
+  let backing(fill, body) = block(width: 100%, height: 100%, fill: fill, clip: true, align(center + horizon, body))
+  let clear = black.transparentize(100%)
   if type(poster) == str or type(poster) == bytes {
-    fill(image(poster, width: 100%, height: 100%, fit: "contain"))
+    backing(clear, image(poster, width: 100%, height: 100%, fit: "contain"))
   } else if type(poster) == content {
-    block(width: 100%, height: 100%, fill: black, clip: true, poster)
+    backing(clear, poster)
   } else if gif-data != none {
-    fill(image(gif-data, format: "gif", width: 100%, height: 100%, fit: "contain"))
+    backing(black, image(gif-data, format: "gif", width: 100%, height: 100%, fit: "contain"))
   } else {
-    fill(none)
+    backing(black, none)
   }
 }
 
