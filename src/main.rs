@@ -7,8 +7,11 @@ use bella_presenter::app::PresenterApp;
 fn main() {
   tracing_subscriber::fmt()
     .with_env_filter(
-      // Quiet wgpu's very chatty per-frame INFO logging by default (GPUI draws with it on Linux).
-      tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info,wgpu=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn".into()),
+      // Quiet wgpu's very chatty per-frame INFO logging by default (GPUI draws with it on Linux), and
+      // symphonia's notes about every clip it opens.
+      tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        "info,wgpu=warn,wgpu_core=warn,wgpu_hal=warn,naga=warn,symphonia_core=warn,symphonia_format_isomp4=warn,symphonia_codec_aac=warn".into()
+      }),
     )
     .init();
 

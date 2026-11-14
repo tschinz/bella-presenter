@@ -13,9 +13,9 @@ use anyhow::{Context as _, Result, anyhow};
 use cpal::traits::{DeviceTrait as _, HostTrait as _, StreamTrait as _};
 use cpal::{FromSample, SampleFormat, SizedSample};
 use symphonia::core::errors::Error as DecodeError;
-use symphonia::core::formats::TrackType;
-use symphonia::core::formats::probe::Hint;
+use symphonia::core::formats::{FormatReader as _, TrackType};
 use symphonia::core::io::MediaSourceStream;
+use symphonia::default::formats::IsoMp4Reader;
 
 /// Decoded chunks waiting for the output device: about a quarter of a second at 48 kHz.
 const QUEUE: usize = 12;
@@ -131,9 +131,8 @@ fn decode_loop(bytes: &Arc<[u8]>, looping: bool, rate: u32, channels: usize, tx:
 /// `emit` until it returns false. Returns whether the whole track was decoded.
 pub fn decode_sound(bytes: &Arc<[u8]>, rate: u32, channels: usize, mut emit: impl FnMut(Vec<f32>) -> bool) -> Result<bool> {
   let source = MediaSourceStream::new(Box::new(Cursor::new(bytes.clone())), Default::default());
-  let mut hint = Hint::new();
-  hint.with_extension("mp4");
-  let mut format = symphonia::default::get_probe().probe(&hint, source, Default::default(), Default::default())?;
+  // The file is an MP4: open it directly instead of probing (the probe calls the box size "junk").
+  let mut format = IsoMp4Reader::try_new(source, Default::default())?;
   let (track, mut decoder) = {
     let track = format.default_track(TrackType::Audio).context("no sound track")?;
     let params = track.codec_params.as_ref().and_then(|p| p.audio()).context("no sound parameters")?;
