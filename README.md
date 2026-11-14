@@ -198,7 +198,7 @@ Open the PDF in bella-presenter: the clips play when their slide comes up.
 | Option | Default | Meaning |
 | --- | --- | --- |
 | `width`, `height` | `100%` | Size of the box on the slide |
-| `poster` | `none` | What other viewers show: an image path, image bytes or any content, drawn as it is (a transparent SVG or PNG keeps the slide behind it). `none` shows a GIF's first frame, or a black block for a video |
+| `poster` | `none` | What other viewers show: an image path, image bytes or any content, drawn as it is (a transparent SVG or PNG keeps the slide behind it). `none` shows a local GIF's first frame (as it is, without a box), or a black block for a video or a web GIF |
 | `autoplay` | `true` | `false` shows the placeholder (first frame, poster or black) and waits for `Space` |
 | `loop` | `true` | `false` stops on the last frame |
 | `muted` | `false` | `true` silences the video's sound (videos play their AAC sound through the default output) |
