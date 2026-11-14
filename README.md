@@ -26,6 +26,10 @@ It stays instant even on large decks (300+ pages) thanks to lazy rendering, a te
 
 ## Screenshots
 
+**In action** - a walk through the [showcase deck](examples/showcase.pdf): presenter view, links, speaker notes, drawing, black screen, whiteboard, webcam and media.
+
+![Presenting the showcase deck: slides change, notes and thumbnails follow, a drawing and the whiteboard appear](img/screenrec-presentation.gif)
+
 **Start screen** - launch with no file to pick from your recent decks, or just drag & drop a PDF onto the window.
 
 ![Start screen with a recent-files list](img/screenshot-startpage.png)
@@ -88,6 +92,7 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 - **Background options.** Keep the normal background, blur it, or remove it to show only the person. See the screenshots above. Removal uses a small built-in segmentation model (about 0.5 MB) and runs locally on the CPU; no images are uploaded.
 - **Talk timer + clock, light/dark theme.** Large centered footer with slide number, wall clock, and a stopwatch that follows the presentation; pause, resume and reset it with `K` / `R` or the buttons next to it. Cycle system/dark/light theme from the header.
 - **Go to a slide.** Type its number and press `Enter`; the footer shows what you typed.
+- **GIFs and videos on slides.** Decks made with [`bella-media.typ`](bella-media.typ) carry their GIF and MP4 clips inside the PDF; bella-presenter plays them exactly over the static placeholder that other PDF viewers show. See [Media in slides](#media-in-slides).
 - **Clickable links.** Links in the PDF work on either window: a click on a link to another slide jumps there, web and mail links open in the browser or mail app. The cursor turns into a hand over a link.
 - **Recent files + resume.** Launch with no file to pick a recent deck; reopening resumes at the page you left off.
 - **Open with.** Installed builds appear in the OS "Open with" menu for PDFs (macOS, Linux `.deb`, Windows via `install.ps1`); the file opens directly, also into a running instance.
@@ -99,13 +104,15 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | Input | Action |
 | --- | --- |
 | `→` / `Space` / `PageDown` / scroll down | Next slide |
+| `Space` (slide with media) | Play / pause the slide's GIFs and videos |
+| `R` (slide with media) | Restart the slide's GIFs and videos |
 | `←` / `PageUp` / scroll up | Previous slide |
 | `Home` / `End` | First / last slide |
 | `F5` / `Esc` | Start / quit presentation |
 | `B` | Blank the audience screen (black) |
 | `,` | Whiteboard: a white page to draw on, on both screens (again to leave) |
 | `W` | Close the file, back to the start screen |
-| `R` | Reset the talk timer |
+| `R` | Reset the talk timer (on a slide with media: restart its clips; the footer button always resets) |
 | `K` | Pause / resume the talk timer (also a button in the footer) |
 | Number + `Enter` | Go to that slide (`Esc` cancels) |
 | `L` | Flip layout |
@@ -124,6 +131,80 @@ irm https://raw.githubusercontent.com/tschinz/bella-presenter/main/install.ps1 |
 | Drag & drop a PDF | Open it |
 
 All mouse features work on **either window** and drive the same shared state, so the pointer, drawings, and zoom always mirror between the presenter and audience screens. The **Shortcuts** button in the header shows this list in-app.
+
+## Media in slides
+
+![A slide with a local GIF, a GIF from the web, a local video and a video from the web, all playing](img/screenrec-media.gif)
+
+Animated GIFs and MP4 videos play right on your Typst slides. They live inside the PDF, or come from a URL, so there are no extra files to carry around. Any other PDF viewer shows a still placeholder in their place.
+
+**1. Get the template.** Copy [`bella-media.typ`](bella-media.typ) into the root folder of your Typst project and import it:
+
+```typst
+#import "/bella-media.typ": media, media-url
+```
+
+**2. Add media.** Each call reserves a box of the given size; the clip is letterboxed inside it.
+
+A local GIF (other viewers show its first frame):
+
+```typst
+#media("clips/demo.gif", width: 12cm, height: 6.75cm)
+```
+
+A local MP4 with a poster image (other viewers show the poster):
+
+```typst
+#media("clips/demo.mp4", width: 12cm, height: 6.75cm, poster: "clips/demo-poster.png")
+```
+
+A GIF from a URL:
+
+```typst
+#media-url("https://media.giphy.com/media/yk8tRCZHCV0qY/giphy.gif", width: 8cm, height: 6cm)
+```
+
+An MP4 from a URL, with any content as the poster:
+
+```typst
+#media-url(
+  "https://example.org/talk/demo.mp4",
+  width: 12cm,
+  height: 6.75cm,
+  poster: align(center + horizon, text(fill: white)[Demo video]),
+)
+```
+
+**3. Compile** from the project root, so the template can read your files:
+
+```bash
+typst compile --root . slides.typ
+```
+
+Open the PDF in bella-presenter: the clips play when their slide comes up.
+
+| Option | Default | Meaning |
+| --- | --- | --- |
+| `width`, `height` | `100%` | Size of the box on the slide |
+| `poster` | `none` | What other viewers show: an image path, image bytes or any content. `none` shows a GIF's first frame, or black for a video |
+| `autoplay` | `true` | `false` waits for `Space` |
+| `loop` | `true` | `false` stops on the last frame |
+| `mime` | `auto` | Taken from the file extension; set `"image/gif"` or `"video/mp4"` for a URL without one |
+| `name` | `auto` | The file name inside the PDF; needed when you pass bytes instead of a path |
+
+Good to know:
+
+- **Paths** are relative to the folder holding `bella-media.typ`, or start with `/` (the project root with `--root .`). To use a path relative to your own file, pass the bytes: `#media(read("demo.gif", encoding: none), name: "demo.gif", width: 8cm, height: 6cm)`.
+- **Formats:** GIF and H.264 MP4 (Baseline, Main, High). WebM and other codecs keep their placeholder, with a note in the footer. There is no sound; clips always play muted. Convert a screen recording or another video with:
+
+  ```bash
+  ffmpeg -i recording.mov -c:v libx264 -crf 23 -pix_fmt yuv420p -an -movflags +faststart demo.mp4
+  ```
+
+- **URLs** must point at the file itself over HTTPS. A Giphy page has a direct link (`media.giphy.com/media/<id>/giphy.gif`); YouTube serves no video file and cannot be used. Web media loads when its slide is next or current and is kept for the session; offline, the placeholder stays and the footer shows a note.
+- **Playback:** clips play on the current slide in the presenter and audience windows, letterboxed like CSS `object-fit: contain`, and follow zoom. The next-slide preview and thumbnails show the placeholder. A clip starts over when you come back to its slide; `Space` pauses and plays the clips of the current slide, `R` starts them over.
+
+[`examples/showcase.typ`](examples/showcase.typ) uses all of this; its PDF shows every feature of the app.
 
 ## Webcam
 
