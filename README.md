@@ -158,6 +158,12 @@ A local MP4 with a poster image (other viewers show the poster):
 #media("clips/demo.mp4", width: 12cm, height: 6.75cm, poster: "clips/demo-poster.png")
 ```
 
+The same video without its sound (videos play their sound by default):
+
+```typst
+#media("clips/demo.mp4", width: 12cm, height: 6.75cm, poster: "clips/demo-poster.png", muted: true)
+```
+
 A GIF from a URL:
 
 ```typst
@@ -189,13 +195,14 @@ Open the PDF in bella-presenter: the clips play when their slide comes up.
 | `poster` | `none` | What other viewers show: an image path, image bytes or any content. `none` shows a GIF's first frame, or black for a video |
 | `autoplay` | `true` | `false` waits for `Space` |
 | `loop` | `true` | `false` stops on the last frame |
+| `muted` | `false` | `true` silences the video's sound (videos play their AAC sound through the default output) |
 | `mime` | `auto` | Taken from the file extension; set `"image/gif"` or `"video/mp4"` for a URL without one |
 | `name` | `auto` | The file name inside the PDF; needed when you pass bytes instead of a path |
 
 Good to know:
 
 - **Paths** are relative to the folder holding `bella-media.typ`, or start with `/` (the project root with `--root .`). To use a path relative to your own file, pass the bytes: `#media(read("demo.gif", encoding: none), name: "demo.gif", width: 8cm, height: 6cm)`.
-- **Formats:** GIF and H.264 MP4 (Baseline, Main, High). WebM and other codecs keep their placeholder, with a note in the footer. There is no sound; clips always play muted. Convert a screen recording or another video with:
+- **Formats:** GIF and H.264 MP4 (Baseline, Main, High). WebM and other codecs keep their placeholder, with a note in the footer. A video plays its AAC sound unless you set `muted: true`; the sound sets the pace, so picture and sound stay together. Convert a screen recording or another video with (drop `-an` and add `-c:a aac` to keep the sound):
 
   ```bash
   ffmpeg -i recording.mov -c:v libx264 -crf 23 -pix_fmt yuv420p -an -movflags +faststart demo.mp4
