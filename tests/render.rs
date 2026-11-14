@@ -86,6 +86,8 @@ fn render_pipeline_smoke() {
   let videos: Vec<_> = deck.media().iter().filter(|m| kind(m) == (Format::Mp4, true)).collect();
   assert_eq!(videos.iter().filter(|m| !m.muted).count(), 1, "one video with sound");
   assert!(videos.iter().any(|m| m.page == four && m.muted), "the four-media video is muted");
+  // Clips start by themselves unless they set `autoplay: false`; the showcase keeps the default.
+  assert!(deck.media().iter().all(|m| m.autoplay));
 
   // The web GIF there has no poster, so it shows a black block: its edges are the media rectangle
   // (top-left origin, y down), so playing media covers the placeholder exactly.

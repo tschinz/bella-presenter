@@ -4,9 +4,11 @@
 //   #media("clips/demo.gif", width: 8cm, height: 4.5cm)
 //   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, poster: "clips/demo-poster.png")
 //   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, muted: true)   // without its sound
+//   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, autoplay: false)   // waits for Space
 //   #media-url("https://example.org/clip.gif", width: 8cm, height: 4.5cm)
 //
-// Videos play their sound; `muted: true` silences a clip.
+// Clips start by themselves; `autoplay: false` shows the placeholder and waits for Space. Videos
+// play their sound; `muted: true` silences a clip.
 //
 // The page shows a static placeholder in the media rectangle (a GIF's first frame, the poster, or
 // a black block), so any PDF viewer shows something sensible. The media files and a manifest,
@@ -23,7 +25,8 @@
 //   w_pt h_pt size in points
 //   mime      image/gif, video/mp4 or video/webm
 //   file url  attachment name ("media/...") or web address; the other one is null
-//   autoplay loop muted   playback hints (a video plays its sound unless muted)
+//   autoplay loop muted   playback hints (a clip starts by itself unless autoplay is false; a
+//                         video plays its sound unless muted)
 
 #let _items = counter("bella-media")
 
@@ -130,6 +133,7 @@
 /// - src: path (see above) or bytes
 /// - name: attachment file name, required when `src` is bytes
 /// - poster: none (GIF: first frame, video: black), an image path or bytes, or any content
+/// - autoplay: false shows the placeholder and waits for Space
 /// - muted: true silences a video's sound
 #let media(
   src,
