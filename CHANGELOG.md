@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.0] - 2026-11-14
+
+### 🚀 Features
+
+- *(media)* Play gif and mp4 clips embedded in pdf slides ([8b48928](https://github.com/tschinz/bella-presenter/commit/8b48928c40eda8bb7374d9ca5ce0bfcbaf16ec44) - zas)
+
+### 📚 Documentation
+
+- *(examples)* Replace the aprog decks with a showcase of every feature ([7b8d504](https://github.com/tschinz/bella-presenter/commit/7b8d5046794948bededa50b9c28fb7ea825b5b78) - zas)
+- *(readme)* Explain media in slides and show screen recordings ([6649b07](https://github.com/tschinz/bella-presenter/commit/6649b078d3d47495222044b9454fe4b2bce7e3be) - zas)
+
+
+**Full Changelog**: [v0.6.1...v0.7.0](https://github.com/tschinz/bella-presenter/compare/v0.6.1...v0.7.0)
+
 ## [0.6.1] - 2026-11-13
 
 ### 🚀 Features
