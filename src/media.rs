@@ -572,13 +572,14 @@ impl Playback {
     self.running.get(&index).and_then(|r| r.picture.clone())
   }
 
-  /// Pause the clips on `page` if any plays, else play them all. Returns whether there were any.
+  /// Play the clips on `page` if any is waiting (not started, paused or ended), else pause them
+  /// all. Returns whether there were any.
   pub fn toggle(&mut self, page: usize) -> bool {
     let now = Instant::now();
     let mut clips: Vec<_> = self.running.values_mut().filter(|r| r.page == page).collect();
-    let any_playing = clips.iter().any(|r| r.player.playing());
+    let any_waiting = clips.iter().any(|r| !r.player.playing());
     for r in &mut clips {
-      if r.player.playing() == any_playing {
+      if r.player.playing() != any_waiting {
         r.player.toggle(now);
       }
     }
@@ -770,5 +771,35 @@ mod tests {
     };
     assert_eq!(again, first, "the first frame again");
     assert_eq!(player.wake_in(later), Some(first_delay));
+  }
+
+  #[test]
+  fn space_plays_waiting_clips_before_it_pauses() {
+    let Ok(bytes) = std::fs::read("examples/clips/big-lebowski-1.gif") else {
+      return;
+    };
+    let bytes: Arc<[u8]> = bytes.into();
+    let mut playback = Playback::new(Waker::new().0);
+    for (i, playing) in [(0, true), (1, false)] {
+      let player = Player::new(Format::Gif, bytes.clone(), true, playing, false);
+      playback.running.insert(
+        i,
+        Running {
+          page: 3,
+          player,
+          picture: None,
+        },
+      );
+    }
+    let playing = |p: &Playback| {
+      let mut states: Vec<_> = p.running.iter().map(|(i, r)| (*i, r.player.playing())).collect();
+      states.sort();
+      states
+    };
+    assert!(playback.toggle(3));
+    assert_eq!(playing(&playback), [(0, true), (1, true)], "the waiting clip starts, the other keeps playing");
+    playback.toggle(3);
+    assert_eq!(playing(&playback), [(0, false), (1, false)], "all play: Space pauses them");
+    assert!(!playback.toggle(4), "no clips on another page");
   }
 }
