@@ -36,6 +36,17 @@ pub enum Format {
   Mp4,
 }
 
+/// How a clip fills its box, as CSS `object-fit`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Fit {
+  /// The whole clip, letterboxed.
+  #[default]
+  Contain,
+  /// The whole box, cutting off what overflows.
+  Cover,
+}
+
 /// Where a media item's bytes come from.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Source {
@@ -58,6 +69,7 @@ pub struct Item {
   pub looping: bool,
   /// Whether a video's sound is silenced (it plays by default).
   pub muted: bool,
+  pub fit: Fit,
 }
 
 /// A manifest entry as `bella-media.typ` writes it.
@@ -80,6 +92,8 @@ struct ManifestEntry {
   looping: bool,
   #[serde(default)]
   muted: bool,
+  #[serde(default)]
+  fit: Fit,
 }
 
 fn yes() -> bool {
@@ -161,6 +175,7 @@ fn item(e: ManifestEntry, page_sizes: &[PageSize], files: &HashMap<String, Arc<[
     autoplay: e.autoplay,
     looping: e.looping,
     muted: e.muted,
+    fit: e.fit,
   })
 }
 
@@ -654,7 +669,7 @@ mod tests {
       {"kind":"file","page":2,"x_pt":72,"y_pt":40.5,"w_pt":360,"h_pt":202.5,"mime":"video/mp4",
        "file":"media/a.mp4","url":null,"autoplay":false,"loop":true},
       {"kind":"url","page":1,"x_pt":0,"y_pt":0,"w_pt":720,"h_pt":405,"mime":"image/gif",
-       "file":null,"url":"https://example.org/a.gif","autoplay":true,"loop":false,"muted":true}]"#;
+       "file":null,"url":"https://example.org/a.gif","autoplay":true,"loop":false,"muted":true,"fit":"cover"}]"#;
     let (items, warnings) = parse(json, &[("media/a.mp4", b"mp4")]);
     assert!(warnings.is_empty(), "{warnings:?}");
     assert_eq!(items.len(), 2);
@@ -672,6 +687,7 @@ mod tests {
     assert_eq!(a.source, Source::Embedded(Arc::from(&b"mp4"[..])));
     assert_eq!(items[1].source, Source::Url("https://example.org/a.gif".into()));
     assert_eq!(items[1].area, Region::FULL);
+    assert_eq!((a.fit, items[1].fit), (Fit::Contain, Fit::Cover), "contain unless the manifest says otherwise");
   }
 
   #[test]

@@ -153,11 +153,11 @@ impl Document {
     &self.media_warnings
   }
 
-  /// The media on the slide part of `page`: item index and area relative to the slide.
-  pub fn slide_media(&self, page: usize) -> Vec<(usize, Region)> {
+  /// The media on the slide part of `page`: item index, area relative to the slide and fit.
+  pub fn slide_media(&self, page: usize) -> Vec<(usize, Region, media::Fit)> {
     let slide = self.slide_region(page);
     let on_page = self.media.iter().enumerate().filter(|(_, m)| m.page == page);
-    on_page.filter_map(|(i, m)| Some((i, on_slide(slide, m.area)?))).collect()
+    on_page.filter_map(|(i, m)| Some((i, on_slide(slide, m.area)?, m.fit))).collect()
   }
 
   /// Render just the slide portion of a page (the audience view).

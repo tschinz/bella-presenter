@@ -5,10 +5,12 @@
 //   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, poster: "clips/demo-poster.png")
 //   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, muted: true)   // without its sound
 //   #media("clips/demo.mp4", width: 8cm, height: 4.5cm, autoplay: false)   // waits for Space
+//   #media("clips/wide.mp4", width: 100%, height: 100%, fit: "cover")   // fills the box, crops the rest
 //   #media-url("https://example.org/clip.gif", width: 8cm, height: 4.5cm)
 //
 // Clips start by themselves; `autoplay: false` shows the placeholder and waits for Space. Videos
-// play their sound; `muted: true` silences a clip.
+// play their sound; `muted: true` silences a clip. A clip and its placeholder are letterboxed in
+// their box; `fit: "cover"` fills the box instead and cuts off what overflows (CSS `object-fit`).
 //
 // The page shows a static placeholder in the media rectangle (a GIF's first frame, the poster, or
 // a black block), so any PDF viewer shows something sensible. The media files and a manifest,
@@ -27,6 +29,7 @@
 //   file url  attachment name ("media/...") or web address; the other one is null
 //   autoplay loop muted   playback hints (a clip starts by itself unless autoplay is false; a
 //                         video plays its sound unless muted)
+//   fit       "contain" (letterboxed) or "cover" (fills the box, cropped)
 
 #let _items = counter("bella-media")
 
@@ -44,15 +47,15 @@
 // slide behind it; only a video without a poster gets a black block. The invisible backing box
 // marks the rectangle as drawn on this page (hidden content draws nothing), which bella-presenter
 // checks before playing.
-#let _placeholder(poster, gif-data) = {
+#let _placeholder(poster, gif-data, fit) = {
   let backing(fill, body) = block(width: 100%, height: 100%, fill: fill, clip: true, align(center + horizon, body))
   let clear = black.transparentize(100%)
   if type(poster) == str or type(poster) == bytes {
-    backing(clear, image(poster, width: 100%, height: 100%, fit: "contain"))
+    backing(clear, image(poster, width: 100%, height: 100%, fit: fit))
   } else if type(poster) == content {
     backing(clear, poster)
   } else if gif-data != none {
-    backing(clear, image(gif-data, format: "gif", width: 100%, height: 100%, fit: "contain"))
+    backing(clear, image(gif-data, format: "gif", width: 100%, height: 100%, fit: fit))
   } else {
     backing(black, none)
   }
@@ -90,6 +93,7 @@
       autoplay: m.autoplay,
       loop: m.loop,
       muted: m.muted,
+      fit: m.fit,
     ))
   }
   pdf.attach(
@@ -100,13 +104,14 @@
   )
 }
 
-#let _media(kind, key, name, data, url, mime, width, height, poster, autoplay, loop, muted) = {
+#let _media(kind, key, name, data, url, mime, width, height, poster, autoplay, loop, muted, fit) = {
+  assert(fit in ("contain", "cover"), message: "bella-media: fit is \"contain\" or \"cover\", not " + repr(fit))
   _items.step()
   let gif-data = if mime == "image/gif" { data } else { none }
   // The placeholder fills the box; `layout` only records where the box landed (a `place` inside
   // `layout` shifts it off the box in some containers, such as grid cells).
   box(width: width, height: height, {
-    place(top + left, _placeholder(poster, gif-data))
+    place(top + left, _placeholder(poster, gif-data, fit))
     layout(size => {
     let p = here().position()
     [#metadata((
@@ -124,6 +129,7 @@
         autoplay: autoplay,
         loop: loop,
         muted: muted,
+        fit: fit,
       ))<bella-media>]
     if _items.get().first() == 1 { _attach-all() }
   })
@@ -136,6 +142,7 @@
 /// - poster: none (GIF: first frame, video: black), an image path or bytes, or any content
 /// - autoplay: false shows the placeholder and waits for Space
 /// - muted: true silences a video's sound
+/// - fit: "contain" letterboxes the clip in its box, "cover" fills the box and crops the rest
 #let media(
   src,
   width: 100%,
@@ -146,6 +153,7 @@
   autoplay: true,
   loop: true,
   muted: false,
+  fit: "contain",
 ) = {
   let name = if name != auto { name } else if type(src) == str { _base-name(src) } else {
     panic("bella-media: pass name: for media given as bytes")
@@ -153,7 +161,7 @@
   let data = if type(src) == bytes { src } else { read(src, encoding: none) }
   let key = if type(src) == str { src } else { "bytes:" + name }
   let mime = if mime == auto { _mime-of(name) } else { mime }
-  _media("file", key, name, data, none, mime, width, height, poster, autoplay, loop, muted)
+  _media("file", key, name, data, none, mime, width, height, poster, autoplay, loop, muted, fit)
 }
 
 /// Media on the web, loaded by bella-presenter when its slide comes up (nothing is embedded).
@@ -166,11 +174,12 @@
   autoplay: true,
   loop: true,
   muted: false,
+  fit: "contain",
 ) = {
   if "youtube.com/" in url or "youtu.be/" in url {
     panic("bella-media: YouTube serves no video file to play; link to the page instead")
   }
   // A page such as giphy.com/gifs/... has no file extension: use the file's own address.
   let mime = if mime == auto { _mime-of(url.split("?").first()) } else { mime }
-  _media("url", url, none, none, url, mime, width, height, poster, autoplay, loop, muted)
+  _media("url", url, none, none, url, mime, width, height, poster, autoplay, loop, muted, fit)
 }

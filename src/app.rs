@@ -44,7 +44,7 @@ use crate::Waker;
 use crate::camera::controller::CameraController;
 use crate::config::{self, Geometry};
 use crate::document::Document;
-use crate::media::Playback;
+use crate::media::{self, Playback};
 use crate::render::{self, LinkTarget};
 use crate::screen;
 use crate::session::{Session, format_elapsed};
@@ -1684,9 +1684,9 @@ impl PresenterApp {
     }
     // Clips play on the current slide only; previews and thumbnails keep the placeholder.
     if current && !board {
-      for (item, area) in doc.slide_media(page) {
+      for (item, area, fit) in doc.slide_media(page) {
         if let Some(picture) = self.playback.picture(item) {
-          paint_media(window, rect, uv, area, picture);
+          paint_media(window, rect, uv, area, fit, picture);
         }
       }
     }
@@ -2435,13 +2435,17 @@ pub(crate) fn paint_cropped(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f
   }
 }
 
-/// Paint a media `picture` letterboxed into its slide-normalized `area`, clipped to the visible
-/// slide `rect` (which shows the slide window `uv`).
-fn paint_media(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f32>, area: render::Region, picture: Arc<RenderImage>) {
+/// Paint a media `picture` into its slide-normalized `area` as `fit` says, clipped to that area
+/// and to the visible slide `rect` (which shows the slide window `uv`).
+fn paint_media(window: &mut Window, rect: Bounds<f32>, uv: Bounds<f32>, area: render::Region, fit: media::Fit, picture: Arc<RenderImage>) {
   let frame = picture.size(0);
   let aspect = frame.width.0 as f32 / frame.height.0.max(1) as f32;
-  let target = contain(media_rect(rect, uv, area), aspect);
-  let clip = target.intersect(&rect);
+  let outer = media_rect(rect, uv, area);
+  let target = match fit {
+    media::Fit::Contain => contain(outer, aspect),
+    media::Fit::Cover => cover(outer, aspect),
+  };
+  let clip = target.intersect(&outer).intersect(&rect);
   if clip.size.width <= 0.0 || clip.size.height <= 0.0 {
     return;
   }
@@ -2464,6 +2468,17 @@ fn contain(outer: Bounds<f32>, aspect: f32) -> Bounds<f32> {
     size(h * aspect, h)
   } else {
     size(w, w / aspect.max(1e-6))
+  };
+  Bounds::centered_at(outer.center(), fit)
+}
+
+/// The smallest centred box of `aspect` (w/h) that covers `outer`, as CSS `object-fit: cover`.
+fn cover(outer: Bounds<f32>, aspect: f32) -> Bounds<f32> {
+  let (w, h) = (outer.size.width, outer.size.height);
+  let fit = if w / h.max(1e-6) > aspect {
+    size(w, w / aspect.max(1e-6))
+  } else {
+    size(h * aspect, h)
   };
   Bounds::centered_at(outer.center(), fit)
 }
@@ -2690,6 +2705,13 @@ mod tests {
     let outer = Bounds::new(point(10.0, 20.0), size(400.0, 100.0));
     assert_eq!(contain(outer, 2.0), Bounds::new(point(110.0, 20.0), size(200.0, 100.0)));
     assert_eq!(contain(outer, 8.0), Bounds::new(point(10.0, 45.0), size(400.0, 50.0)));
+  }
+
+  #[test]
+  fn cover_fills_and_overflows_like_css() {
+    let outer = Bounds::new(point(10.0, 20.0), size(400.0, 100.0));
+    assert_eq!(cover(outer, 2.0), Bounds::new(point(10.0, -30.0), size(400.0, 200.0)));
+    assert_eq!(cover(outer, 8.0), Bounds::new(point(-190.0, 20.0), size(800.0, 100.0)));
   }
 
   fn wide_area() -> Bounds<f32> {

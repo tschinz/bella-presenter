@@ -92,7 +92,7 @@ fn render_pipeline_smoke() {
   // The web GIF there has no poster, so it shows a black block: its edges are the media rectangle
   // (top-left origin, y down), so playing media covers the placeholder exactly.
   let (w, h) = (1000, 563);
-  let (_, area) = deck.slide_media(four)[1];
+  let (_, area, _) = deck.slide_media(four)[1];
   let img = deck.render_slide(four, [w, h]).expect("render media page");
   let black = |x: u32, y: u32| img.get_pixel(x, y).0[..3].iter().all(|c| *c < 30);
   let (cx, cy) = (((area.x + area.w / 2.0) * w as f32) as u32, ((area.y + area.h / 2.0) * h as f32) as u32);
