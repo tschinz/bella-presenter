@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.3] - 2026-11-16
+
+### 🚀 Features
+
+- *(media)* Let clips cover their box with fit: "cover" ([9ae2798](https://github.com/tschinz/bella-presenter/commit/9ae2798c223f72e619a306b8fc8f80f5640e168a) - zas)
+
+
+**Full Changelog**: [v0.7.2...v0.7.3](https://github.com/tschinz/bella-presenter/compare/v0.7.2...v0.7.3)
+
 ## [0.7.2] - 2026-11-14
 
 ### 🐛 Bug Fixes
