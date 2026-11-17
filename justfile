@@ -8,7 +8,11 @@ app_name := "bella-presenter"
 crate_name := "bella_presenter"
 args := ""
 project_directory := justfile_directory()
-release := `git describe --tags --always 2>/dev/null || echo v0.1.0`
+release := if os() == "windows" {
+    `git describe --tags --always 2>NUL || echo v0.1.0`
+} else {
+    `git describe --tags --always 2>/dev/null || echo v0.1.0`
+}
 version := "0.7.4"
 url := "https://github.com/tschinz/bella-presenter"
 file := "examples/showcase.pdf"
@@ -139,9 +143,17 @@ install-nightly:
 #
 
 # Build and copy the release version of the program
+[unix]
 build:
     cargo build --release
     mkdir -p bin && cp target/release/{{ app_name }} bin/
+
+# Build and copy the release version of the program
+[windows]
+build:
+    cargo build --release
+    if not exist "bin" mkdir "bin"
+    copy /Y "target\release\{{ app_name }}.exe" "bin\"
 
 # Run cargo check (fast compile check, no codegen)
 check:
