@@ -16,6 +16,9 @@
 // a black block), so any PDF viewer shows something sensible. The media files and a manifest,
 // `bella-media.json`, are attached to the PDF; bella-presenter plays them over the placeholder.
 //
+// A small PDF without clips: `typst compile --input media=still` draws only the placeholders and
+// attaches nothing, so the PDF shows the stills in bella-presenter too.
+//
 // Paths are read by this file, so they are relative to the folder holding bella-media.typ (the
 // project root), or start with "/" (also the project root with `typst compile --root .`). A file
 // can also be passed as bytes, then `name` is required.
@@ -32,6 +35,10 @@
 //   fit       "contain" (letterboxed) or "cover" (fills the box, cropped)
 
 #let _items = counter("bella-media")
+
+// `--input media=embed|still`: still leaves out the clips and the manifest, only the placeholders stay.
+#let _mode = sys.inputs.at("media", default: "embed")
+#assert(_mode in ("embed", "still"), message: "bella-media: --input media is embed or still, not " + repr(_mode))
 
 #let _mime-of(name) = {
   let ext = lower(name.split(".").last())
@@ -106,8 +113,9 @@
 
 #let _media(kind, key, name, data, url, mime, width, height, poster, autoplay, loop, muted, fit) = {
   assert(fit in ("contain", "cover"), message: "bella-media: fit is \"contain\" or \"cover\", not " + repr(fit))
-  _items.step()
   let gif-data = if mime == "image/gif" { data } else { none }
+  if _mode == "still" { return box(width: width, height: height, _placeholder(poster, gif-data, fit)) }
+  _items.step()
   // The placeholder fills the box; `layout` only records where the box landed (a `place` inside
   // `layout` shifts it off the box in some containers, such as grid cells).
   box(width: width, height: height, {
@@ -158,9 +166,12 @@
   let name = if name != auto { name } else if type(src) == str { _base-name(src) } else {
     panic("bella-media: pass name: for media given as bytes")
   }
-  let data = if type(src) == bytes { src } else { read(src, encoding: none) }
-  let key = if type(src) == str { src } else { "bytes:" + name }
   let mime = if mime == auto { _mime-of(name) } else { mime }
+  // a still PDF needs the bytes of a GIF only (its first frame), never those of a video
+  let data = if type(src) == bytes { src } else if _mode == "still" and mime != "image/gif" { none } else {
+    read(src, encoding: none)
+  }
+  let key = if type(src) == str { src } else { "bytes:" + name }
   _media("file", key, name, data, none, mime, width, height, poster, autoplay, loop, muted, fit)
 }
 

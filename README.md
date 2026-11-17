@@ -217,6 +217,7 @@ Good to know:
 
 - **URLs** must point at the file itself over HTTPS. A Giphy page has a direct link (`media.giphy.com/media/<id>/giphy.gif`); YouTube serves no video file and cannot be used. Web media loads when its slide is next or current and is kept for the session; offline, the placeholder stays and the footer shows a note.
 - **Playback:** clips play on the current slide in the presenter and audience windows, letterboxed like CSS `object-fit: contain` (or filling their box with `fit: "cover"`), and follow zoom. The next-slide preview and thumbnails show the placeholder. Clips start by themselves unless `autoplay: false`. `Space` plays the clips of the current slide that wait, and pauses them all once all play; `R` starts them over. The black screen (`B`) and the whiteboard (`,`) pause the clips of the slide; leaving the slide stops them, and they start over when you come back.
+- **Small PDF:** `typst compile --input media=still deck.typ` keeps the placeholders (first frame or poster) and embeds no clip, for handouts or mail. bella-presenter then shows the stills too. Give every video a `poster`, or it stays a black block.
 - **Builds:** a step that hides a clip (touying's `#pause`, Typst's `hide`) does not play it; the clip plays from the step where it appears.
 
 [`examples/showcase.typ`](examples/showcase.typ) uses all of this; its PDF shows every feature of the app.
