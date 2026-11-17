@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.7.4] - 2026-11-17
+
+### 🚀 Features
+
+- *(media)* Leave out the clips with --input media=still for a small pdf ([ebc0093](https://github.com/tschinz/bella-presenter/commit/ebc00930909e53de7ca408707490eadf124e420a) - zas)
+
+
+**Full Changelog**: [v0.7.3...v0.7.4](https://github.com/tschinz/bella-presenter/compare/v0.7.3...v0.7.4)
+
 ## [0.7.3] - 2026-11-16
 
 ### 🚀 Features
