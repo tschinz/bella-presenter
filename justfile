@@ -100,6 +100,7 @@ setup: check-deps setup-pdfium
     @echo "✓ Setup complete - run 'just run' to start"
 
 # Download the prebuilt PDFium library for this platform
+[unix]
 setup-pdfium:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -112,7 +113,18 @@ setup-pdfium:
     rm pdfium.tgz
     echo "✓ PDFium installed to third_party/pdfium/lib"
 
+# Download the prebuilt PDFium library for Windows without Bash or cygpath
+[windows]
+setup-pdfium:
+    if not exist "third_party\pdfium" mkdir "third_party\pdfium"
+    echo Downloading {{ pdfium_asset }} ...
+    curl.exe --proto "=https" --tlsv1.2 -fsSL -o "third_party\pdfium\pdfium.tgz" "https://github.com/bblanchon/pdfium-binaries/releases/latest/download/{{ pdfium_asset }}"
+    tar.exe xzf "third_party\pdfium\pdfium.tgz" -C "third_party\pdfium"
+    del /Q "third_party\pdfium\pdfium.tgz"
+    echo PDFium installed to third_party\pdfium\bin
+
 # Ensure the PDFium library is present (download it if missing)
+[unix]
 ensure-pdfium:
     #!/usr/bin/env bash
     if ls third_party/pdfium/lib/libpdfium.* >/dev/null 2>&1 \
@@ -121,6 +133,11 @@ ensure-pdfium:
     else
         just setup-pdfium
     fi
+
+# Ensure the Windows PDFium DLL is present (download it if missing)
+[windows]
+ensure-pdfium:
+    if exist "third_party\pdfium\bin\pdfium.dll" (echo PDFium already present) else if exist "third_party\pdfium\lib\pdfium.dll" (echo PDFium already present) else (just setup-pdfium)
 
 # Install toolchain + cargo tooling + PDFium
 install:
